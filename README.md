@@ -253,6 +253,21 @@ php tests/run-tests.php
 
 ## Changelog
 
+### 2.0.2 (mai 2026)
+
+Deux correctifs de robustesse Windows + auto-entreprise (franchise en base TVA) :
+
+- **Compatibilité Windows** ([#4](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/4), reprend la [PR #5](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/pull/5) de [@Charlymd](https://github.com/Charlymd)) :
+  - Le fichier XML temporaire est désormais écrit dans `DOL_DATA_ROOT/facturx/temp/` (toujours dans l'`open_basedir` Dolibarr) au lieu de `sys_get_temp_dir()` qui pouvait pointer hors `open_basedir` sur Windows (`C:\WINDOWS\TEMP`).
+  - Regex de validation `LEMONFACTURX_PHP_CLI_PATH` étendue pour accepter les chemins Windows (`:`, `\`, `(`, `)` ajoutés). `escapeshellarg()` continue de bloquer toute injection.
+- **Franchise en base TVA — auto-entrepreneurs** ([#6](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/6)) :
+  - `CategoryCode` passe de `O` (Services hors champ) à `E` (Exempt from tax) pour les sociétés émettrices non assujetties (293 B CGI). Le code `O` déclenchait BR-O-04/05 sur le taux 0 et était sémantiquement faux (293 B = exonération française, pas hors champ EU).
+  - Pour satisfaire BR-CO-26 / BR-E-09 (identifiant fiscal vendeur), en l'absence de TVA intra le SIREN est désormais publié comme `SpecifiedTaxRegistration schemeID="FC"` (Tax registration identifier France). Plus besoin de saisir un numéro intracom bidon.
+  - Le diagnostic de configuration ne signale plus la TVA intracommunautaire manquante quand la société est en franchise.
+  - `<RateApplicablePercent>` est omis pour `CategoryCode='O'` (belt-and-braces BR-O-04/05).
+
+Aucune migration nécessaire.
+
 ### 2.0.1 (mai 2026)
 
 Correctifs UX du diagnostic de configuration :
