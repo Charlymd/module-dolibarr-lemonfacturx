@@ -75,8 +75,13 @@ class ActionsLemonFacturX
 			return $this->handleNonFatal('LemonFacturX: XML invalide : '.$validationError, $strict, 'PDF classique conservé sans Factur-X');
 		}
 
-		// Écrire le XML dans un fichier temporaire pour le subprocess d'injection
-		$this->xmlTmpFile = tempnam(sys_get_temp_dir(), 'facturx_');
+		// Écrire le XML dans un fichier temporaire pour le subprocess d'injection.
+		// On écrit dans DOL_DATA_ROOT/facturx/temp/ (toujours dans l'open_basedir
+		// Dolibarr) au lieu de sys_get_temp_dir() qui peut tomber hors open_basedir
+		// sur Windows (sys temp = C:\WINDOWS\TEMP).
+		$xmlTempDir = DOL_DATA_ROOT.'/facturx/temp';
+		dol_mkdir($xmlTempDir);
+		$this->xmlTmpFile = tempnam($xmlTempDir, 'facturx_');
 		file_put_contents($this->xmlTmpFile, $xml);
 
 		try {
@@ -131,9 +136,10 @@ class ActionsLemonFacturX
 		// valeur piégée finit en "command not found"), mais on refuse explicitement
 		// les valeurs avec caractères exotiques pour éviter les fautes de frappe
 		// qui partiraient en boucle d'erreur et pour afficher un message clair.
-		if (!preg_match('#^[A-Za-z0-9/._-]+$#', $phpBin)) {
+		// `:`, `\`, `(`, `)` autorisés pour les chemins Windows (ex C:\dolibarr\bin\php\php7.4.26).
+		if (!preg_match('#^[A-Za-z0-9/._:()\\\\-]+$#', $phpBin)) {
 			dol_syslog('LemonFacturX: LEMONFACTURX_PHP_CLI_PATH valeur reçue : '.$phpBin, LOG_ERR);
-			$this->handleNonFatal('LemonFacturX: LEMONFACTURX_PHP_CLI_PATH contient des caractères interdits (attendu : chemin alphanumérique, « / . _ - »)', $strict);
+			$this->handleNonFatal('LemonFacturX: LEMONFACTURX_PHP_CLI_PATH contient des caractères interdits (attendu : chemin alphanumérique, « / . _ - : ( ) \\ »)', $strict);
 			return null;
 		}
 
