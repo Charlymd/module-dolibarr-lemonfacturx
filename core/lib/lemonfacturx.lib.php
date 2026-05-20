@@ -126,7 +126,10 @@ function lemonfacturx_build_xml($invoice, $mysoc)
 		}
 		$xml .= '      <ram:BasisAmount>'.formatAmount($amounts['base']).'</ram:BasisAmount>'."\n";
 		$xml .= '      <ram:CategoryCode>'.xmlEncode($amounts['categoryCode']).'</ram:CategoryCode>'."\n";
-		$xml .= '      <ram:RateApplicablePercent>'.formatAmount($rate).'</ram:RateApplicablePercent>'."\n";
+		// BR-O-05 : pas de RateApplicablePercent pour CategoryCode='O' (services hors champ)
+		if ($amounts['categoryCode'] !== 'O') {
+			$xml .= '      <ram:RateApplicablePercent>'.formatAmount($rate).'</ram:RateApplicablePercent>'."\n";
+		}
 		$xml .= '    </ram:ApplicableTradeTax>'."\n";
 	}
 
@@ -255,7 +258,10 @@ function lemonfacturx_build_line_xml($line, $lineNum, $currency, $invoice, $thir
 	$xml .= '      <ram:ApplicableTradeTax>'."\n";
 	$xml .= '        <ram:TypeCode>VAT</ram:TypeCode>'."\n";
 	$xml .= '        <ram:CategoryCode>'.xmlEncode($taxCat['code']).'</ram:CategoryCode>'."\n";
-	$xml .= '        <ram:RateApplicablePercent>'.formatAmount($vatRate).'</ram:RateApplicablePercent>'."\n";
+	// BR-O-04 : pas de RateApplicablePercent pour CategoryCode='O' (services hors champ)
+	if ($taxCat['code'] !== 'O') {
+		$xml .= '        <ram:RateApplicablePercent>'.formatAmount($vatRate).'</ram:RateApplicablePercent>'."\n";
+	}
 	$xml .= '      </ram:ApplicableTradeTax>'."\n";
 	$xml .= '      <ram:SpecifiedTradeSettlementLineMonetarySummation>'."\n";
 	$xml .= '        <ram:LineTotalAmount>'.formatAmount($lineTotal).'</ram:LineTotalAmount>'."\n";
@@ -318,7 +324,12 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 		'idprof2'   => 'SIRET/SIREN manquant (société) — obligatoire BR-FR-10',
 		'email'     => 'email de la société manquant — obligatoire BR-FR-13 (BT-34)',
 	];
+	$isFranchise = isset($mysoc->tva_assuj) && (int) $mysoc->tva_assuj === 0;
 	foreach ($sellerChecks as $field => $message) {
+		// Franchise en base (293 B CGI) : pas de TVA intra → ne pas warn
+		if ($field === 'tva_intra' && $isFranchise) {
+			continue;
+		}
 		if (empty($mysoc->$field)) {
 			$warnings[] = $prefix.$message;
 		}
@@ -385,6 +396,15 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email)
 	if (!empty($vat)) {
 		$xml .= '      <ram:SpecifiedTaxRegistration>'."\n";
 		$xml .= '        <ram:ID schemeID="VA">'.xmlEncode($vat).'</ram:ID>'."\n";
+		$xml .= '      </ram:SpecifiedTaxRegistration>'."\n";
+	} elseif ($role === 'Seller' && !empty($siren)) {
+		// BR-CO-26 / BR-E-09 : le Seller doit publier un identifiant fiscal
+		// (BT-31 TVA intra OU BT-32 identifiant fiscal). En l'absence de TVA
+		// intra (franchise en base 293 B CGI typiquement), on émet le SIREN
+		// comme tax registration schemeID="FC" (Tax registration identifier
+		// France) pour satisfaire la règle.
+		$xml .= '      <ram:SpecifiedTaxRegistration>'."\n";
+		$xml .= '        <ram:ID schemeID="FC">'.xmlEncode($siren).'</ram:ID>'."\n";
 		$xml .= '      </ram:SpecifiedTaxRegistration>'."\n";
 	}
 	$xml .= '    </ram:'.$tag.'>'."\n";
@@ -466,9 +486,14 @@ function lemonfacturx_map_unit_code($line)
  */
 function lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc)
 {
-	// Société émettrice non assujettie (franchise en base, micro-entreprise) : O = hors champ
+	// Société émettrice non assujettie (franchise en base 293 B CGI, micro-entreprise) :
+	// catégorie E (Exempt from tax). Le code 'O' (Services hors champ) déclencherait
+	// BR-O-04/05 sur le taux 0 et n'est sémantiquement pas le bon (293 B = exonération
+	// française, pas une opération hors champ EU). BR-E-09 demande un identifiant
+	// fiscal vendeur : assuré par SpecifiedTaxRegistration schemeID="FC" (SIREN) dans
+	// lemonfacturx_build_trade_party_xml() quand tva_intra est vide.
 	if (isset($mysoc->tva_assuj) && (int) $mysoc->tva_assuj === 0) {
-		return ['code' => 'O', 'exemption' => 'TVA non applicable, art. 293 B du CGI'];
+		return ['code' => 'E', 'exemption' => 'TVA non applicable, art. 293 B du CGI'];
 	}
 
 	// TVA > 0 : standard
