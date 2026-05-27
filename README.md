@@ -253,6 +253,14 @@ php tests/run-tests.php
 
 ## Changelog
 
+### 2.1.1 (mai 2026)
+
+Correctif du diagnostic de configuration pour les auto-entrepreneurs :
+
+- **Franchise en base TVA** : le diagnostic ne signale plus la TVA intracommunautaire manquante comme une erreur pour une société non assujettie (293 B CGI). Il affiche désormais une ligne valide « non requis (franchise en base) ». Le diagnostic était le seul endroit à ne pas connaître la franchise ; le générateur publiait déjà correctement le SIREN comme identifiant fiscal (`SpecifiedTaxRegistration schemeID="FC"`), donc les factures produites étaient déjà valides — seul l'affichage de la page de config était trompeur.
+
+Aucune migration nécessaire.
+
 ### 2.1.0 (mai 2026)
 
 Adressage de routage par SIREN pour le réseau des Plateformes Agréées (PA/PDP) :
@@ -261,7 +269,6 @@ Adressage de routage par SIREN pour le réseau des Plateformes Agréées (PA/PDP
 - **Schéma configurable** : nouveau réglage `LEMONFACTURX_ENDPOINT_SCHEME` (défaut `0225`), pour les PA attendant un autre code ISO 6523 (`0002` SIREN / `0009` SIRET).
 - **Repli email** : pour un tiers sans SIREN (étranger, hors périmètre de la réforme), l'email (`schemeID="EM"`) reste utilisé — aucun bloc vide émis.
 - **Diagnostic** : BT-34/BT-49 sont considérés satisfaits par le SIREN *ou* l'email ; un acheteur français sans SIREN/SIRET est signalé (non routable sur le réseau PA, même avec un email).
-- **Diagnostic franchise en base** : le diagnostic de configuration ne signale plus la TVA intracommunautaire manquante comme une erreur pour une société non assujettie (293 B CGI, auto-entrepreneurs) — cohérent avec le générateur, qui publie déjà le SIREN comme identifiant fiscal (`schemeID="FC"`).
 
 Le `<ram:SpecifiedLegalOrganization>` (identifiant légal BT-30/BT-47) reste en `schemeID="0002"` : c'est un champ d'*identification* distinct de l'*adressage*, inchangé. Aucune migration nécessaire ; vérifier que le SIRET/SIREN des tiers acheteurs est bien renseigné dans Dolibarr.
 
