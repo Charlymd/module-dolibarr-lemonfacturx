@@ -19,6 +19,7 @@ LemonFacturXDiagResults = Vérification Factur-X EN16931 + règles BR-FR
 LemonFacturXDiagSellerName = Raison sociale émetteur
 LemonFacturXDiagSellerAddress = Adresse émetteur
 LemonFacturXDiagSellerVAT = N° TVA intracommunautaire
+LemonFacturXDiagSellerVATFranchise = non requis (franchise en base, art. 293 B du CGI) — le SIREN est publié comme identifiant fiscal
 LemonFacturXDiagSellerSIRET = SIRET / SIREN
 LemonFacturXDiagSellerEmail = Email émetteur
 LemonFacturXDiagIBAN = IBAN du compte bancaire

@@ -250,7 +250,15 @@ $diagCheck('LemonFacturXDiagSellerName', $mysoc->name);
 $hasAddr = !empty($mysoc->address) && !empty($mysoc->zip) && !empty($mysoc->town);
 $diagCheck('LemonFacturXDiagSellerAddress', $hasAddr ? '1' : '', dol_escape_htmltag($mysoc->zip).' '.dol_escape_htmltag($mysoc->town));
 
-$diagCheck('LemonFacturXDiagSellerVAT', $mysoc->tva_intra);
+// TVA intra : en franchise en base (293 B CGI, auto-entrepreneurs), l'absence de
+// numéro est normale — le SIREN est publié comme identifiant fiscal (schemeID="FC")
+// par le générateur. On n'affiche donc pas d'erreur, cohérent avec check_mandatory().
+$isFranchise = isset($mysoc->tva_assuj) && (int) $mysoc->tva_assuj === 0;
+if ($isFranchise && empty($mysoc->tva_intra)) {
+	$diagOk[] = $langs->trans("LemonFacturXDiagSellerVAT").' : '.$langs->trans("LemonFacturXDiagSellerVATFranchise");
+} else {
+	$diagCheck('LemonFacturXDiagSellerVAT', $mysoc->tva_intra);
+}
 
 if (empty($mysoc->idprof2)) {
 	$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagSellerSIRET").' (BR-FR-10)', 'fix' => '/admin/company.php'];
