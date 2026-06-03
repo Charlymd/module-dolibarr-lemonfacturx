@@ -13,6 +13,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Extract version from tag (strip leading 'v')
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build clean ZIP (dossier racine = lemonfacturx/)
         run: |
@@ -26,11 +30,11 @@ jobs:
             --exclude='/tests' \
             --exclude='/demo' \
             ./ /tmp/build/lemonfacturx/
-          cd /tmp/build && zip -r "/tmp/lemonfacturx-${GITHUB_REF_NAME}.zip" lemonfacturx/
-          unzip -l "/tmp/lemonfacturx-${GITHUB_REF_NAME}.zip" | head -20
+          cd /tmp/build && zip -r "/tmp/module_lemonfacturx-${{ steps.version.outputs.VERSION }}.zip" lemonfacturx/
+          unzip -l "/tmp/module_lemonfacturx-${{ steps.version.outputs.VERSION }}.zip" | head -20
 
       - name: Attach ZIP to release
         uses: softprops/action-gh-release@v2
         with:
-          files: /tmp/lemonfacturx-*.zip
+          files: /tmp/module_lemonfacturx-*.zip
           fail_on_unmatched_files: true
