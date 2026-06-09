@@ -67,6 +67,13 @@ function lemonfacturx_check_supported($invoice)
 		return lemonfacturx_trans('LemonFacturXErrMulticurrency', $invoice->multicurrency_code, $companyCurrency);
 	}
 
+	// Taxes locales (localtax1/2, RE/IRPF...) : non représentables dans le XML
+	// EN16931 (TVA uniquement). Le total XML divergerait du TTC visible sur le
+	// PDF — même principe de refus que le multidevise.
+	if (abs((float) ($invoice->total_localtax1 ?? 0)) > 0.005 || abs((float) ($invoice->total_localtax2 ?? 0)) > 0.005) {
+		return lemonfacturx_trans('LemonFacturXErrLocalTax');
+	}
+
 	if (empty($invoice->date)) {
 		return lemonfacturx_trans('LemonFacturXErrNoDate');
 	}
@@ -113,12 +120,7 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [])
 	$prepared = lemonfacturx_prepare_lines($billableLines, $sign, $invoice, $buyer, $mysoc, $buildWarnings);
 
 	// Ventilation TVA par (catégorie, taux), réconciliée avec les totaux facture
-	$breakdown = lemonfacturx_get_tax_breakdown($billableLines, $invoice, $buyer, $mysoc, $sign, $buildWarnings);
-
-	// Taxes locales (localtax1/2) : non représentées dans le XML (TVA uniquement).
-	if (abs((float) ($invoice->total_localtax1 ?? 0)) > 0.005 || abs((float) ($invoice->total_localtax2 ?? 0)) > 0.005) {
-		$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnLocalTax');
-	}
+	$breakdown = lemonfacturx_get_tax_breakdown($prepared, $invoice, $sign, $buildWarnings);
 
 	// BR-61 : un moyen de paiement 30/58 (virement) exige un IBAN. Sans compte
 	// bancaire configuré, on omet le bloc PaymentMeans plutôt que d'émettre un
@@ -170,7 +172,7 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [])
 	$xmlLineNum = 0;
 	foreach ($prepared['lines'] as $pl) {
 		$xmlLineNum++;
-		$xml .= lemonfacturx_build_line_xml($pl, $xmlLineNum, $currency);
+		$xml .= lemonfacturx_build_line_xml($pl, $xmlLineNum);
 	}
 
 	$xml .= '  <ram:ApplicableHeaderTradeAgreement>'."\n";
@@ -196,14 +198,19 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [])
 	// livraison (repli : date d'émission) et BR-IC-12 un pays de livraison
 	// (BT-80, repli : pays de l'acheteur via ShipToTradeParty).
 	$hasK = false;
+	$hasIntracom = false;
 	foreach ($breakdown as $b) {
 		if ($b['categoryCode'] === 'K') {
 			$hasK = true;
-			break;
+		}
+		if ($b['categoryCode'] === 'K' || $b['categoryCode'] === 'AE') {
+			$hasIntracom = true;
 		}
 	}
+	// Repli date d'émission pour tout l'intracom (K et AE) : BR-IC-11 l'exige
+	// pour K, et les contrôles acheteurs/PDP la consomment aussi pour AE.
 	$deliveryDateTs = !empty($invoice->delivery_date) ? $invoice->delivery_date : ($invoice->date_livraison ?? null);
-	$deliveryDate = !empty($deliveryDateTs) ? date('Ymd', $deliveryDateTs) : ($hasK ? $issueDate : null);
+	$deliveryDate = !empty($deliveryDateTs) ? date('Ymd', $deliveryDateTs) : ($hasIntracom ? $issueDate : null);
 
 	$xml .= '  <ram:ApplicableHeaderTradeDelivery>'."\n";
 	if ($hasK) {
@@ -372,58 +379,50 @@ function lemonfacturx_filter_billable_lines($lines)
  */
 function lemonfacturx_prepare_lines($billableLines, $sign, $invoice, $thirdparty, $mysoc, &$buildWarnings)
 {
-	$lines = [];
-	$allowances = [];
-
-	foreach ($billableLines as $line) {
+	// Constructeur unique de ligne préparée : utilisé par le chemin nominal ET
+	// le fallback "tout négatif" pour que les deux émettent le même mapping.
+	$buildLine = function ($line) use ($sign, $invoice, $thirdparty, $mysoc) {
 		$desc = trim(strip_tags($line->desc ?: ($line->description ?? $line->label ?? '')));
 		if ($desc === '') {
 			$desc = 'Article';
 		}
 		$lineTotal = round($sign * (float) $line->total_ht, 2);
 		$qty = abs((float) $line->qty);
-		$taxCat = lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc);
-
-		if ($lineTotal < 0) {
-			$allowances[] = [
-				'amount'       => abs($lineTotal),
-				'reason'       => $desc,
-				'rate'         => (float) $line->tva_tx,
-				'categoryCode' => $taxCat['code'],
-			];
-			continue;
-		}
-
-		$lines[] = [
+		return [
 			'desc'      => $desc,
 			'qty'       => ($qty != 0.0) ? $qty : 1.0,
 			'unitPrice' => ($qty != 0.0) ? $lineTotal / $qty : $lineTotal,
 			'lineTotal' => $lineTotal,
+			'lineTax'   => $sign * (float) $line->total_tva,
 			'vatRate'   => (float) $line->tva_tx,
-			'taxCat'    => $taxCat,
+			'taxCat'    => lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc),
 			'unitCode'  => lemonfacturx_map_unit_code($line),
 		];
+	};
+
+	$lines = [];
+	$allowances = [];
+	foreach ($billableLines as $line) {
+		$pl = $buildLine($line);
+		if ($pl['lineTotal'] < 0) {
+			$allowances[] = [
+				'amount'       => abs($pl['lineTotal']),
+				'tax'          => $pl['lineTax'],
+				'reason'       => $pl['desc'],
+				'rate'         => $pl['vatRate'],
+				'categoryCode' => $pl['taxCat']['code'],
+				'taxCat'       => $pl['taxCat'],
+			];
+			continue;
+		}
+		$lines[] = $pl;
 	}
 
 	if (empty($lines) && !empty($allowances)) {
 		// Facture intégralement négative hors avoir : pas de conversion BG-21
 		// possible (il faut au moins une ligne). On ré-émet les lignes brutes.
 		$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnAllNegativeLines');
-		$lines = [];
-		foreach ($billableLines as $line) {
-			$desc = trim(strip_tags($line->desc ?: ($line->description ?? $line->label ?? '')));
-			$lineTotal = round($sign * (float) $line->total_ht, 2);
-			$qty = abs((float) $line->qty);
-			$lines[] = [
-				'desc'      => ($desc !== '') ? $desc : 'Article',
-				'qty'       => ($qty != 0.0) ? $qty : 1.0,
-				'unitPrice' => ($qty != 0.0) ? $lineTotal / $qty : $lineTotal,
-				'lineTotal' => $lineTotal,
-				'vatRate'   => (float) $line->tva_tx,
-				'taxCat'    => lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc),
-				'unitCode'  => lemonfacturx_map_unit_code($line),
-			];
-		}
+		$lines = array_map($buildLine, $billableLines);
 		$allowances = [];
 	}
 
@@ -469,8 +468,12 @@ function lemonfacturx_get_direct_debit_info($db, $buyer, &$buildWarnings)
 	];
 
 	if (!empty($buyer->id)) {
+		// type = 'ban' : llx_societe_rib stocke aussi les modes de paiement
+		// carte (Stripe...) avec default_rib = 1 — il ne faut pas les lire.
 		$sql = "SELECT rum, iban_prefix FROM ".MAIN_DB_PREFIX."societe_rib"
-			." WHERE fk_soc = ".((int) $buyer->id)." AND default_rib = 1 LIMIT 1";
+			." WHERE fk_soc = ".((int) $buyer->id)." AND default_rib = 1"
+			." AND (type = 'ban' OR type IS NULL OR type = '')"
+			." ORDER BY rowid ASC LIMIT 1";
 		$res = $db->query($sql);
 		if ($res) {
 			$obj = $db->fetch_object($res);
@@ -553,10 +556,9 @@ function lemonfacturx_build_billing_period_xml($billableLines)
  *
  * @param array  $pl       Ligne préparée (desc, qty, unitPrice, lineTotal, vatRate, taxCat, unitCode)
  * @param int    $lineNum  Numéro de ligne séquentiel
- * @param string $currency Devise (ex: EUR)
  * @return string XML
  */
-function lemonfacturx_build_line_xml($pl, $lineNum, $currency)
+function lemonfacturx_build_line_xml($pl, $lineNum)
 {
 	$xml  = '  <ram:IncludedSupplyChainTradeLineItem>'."\n";
 	$xml .= '    <ram:AssociatedDocumentLineDocument>'."\n";
@@ -594,42 +596,48 @@ function lemonfacturx_build_line_xml($pl, $lineNum, $currency)
 
 /**
  * Calcule la ventilation TVA par (catégorie, taux) — deux catégories distinctes
- * au même taux (ex. E et G à 0 %) produisent deux blocs ApplicableTradeTax.
+ * au même taux (ex. K et AE à 0 %) produisent deux blocs ApplicableTradeTax.
  *
- * Les montants sont arrondis par groupe puis réconciliés avec les totaux de la
- * facture Dolibarr : l'écart d'arrondi éventuel (BR-CO-14/BR-CO-17) est imputé
- * sur le groupe à la plus grande base, pour garantir sum(tax) == total_tva.
+ * Consomme les lignes/remises préparées par lemonfacturx_prepare_lines() (mêmes
+ * catégories, mêmes arrondis) pour garantir la cohérence BR-S-08 : base par
+ * (catégorie, taux) = somme des lignes - remises de la catégorie.
  *
- * @param array  $billableLines  Lignes filtrées (cf. lemonfacturx_filter_billable_lines)
+ * Réconciliation des taxes, dans l'ordre de priorité :
+ *  1. sum(tax) == total_tva facture (écart d'arrondi imputé au plus gros groupe)
+ *  2. BR-CO-17 : chaque groupe doit rester à +/-0.01 de base x taux ; sinon la
+ *     taxe du groupe est recalculée sur la base et un avertissement est émis
+ *     (l'écart résiduel avec le TTC Dolibarr est signalé par build_xml).
+ *
+ * @param array  $prepared       ['lines' => [...], 'allowances' => [...]] (cf. prepare_lines)
  * @param object $invoice        Facture Dolibarr
- * @param object $thirdparty     Tiers acheteur
- * @param object $mysoc          Société émettrice
  * @param float  $sign           1.0 ou -1.0 (avoir)
  * @param array  $buildWarnings  (sortie) avertissements
  * @return array<string,array>   Indexé par "categorie|taux", avec base/tax/rate/categoryCode/exemption/vatex
  */
-function lemonfacturx_get_tax_breakdown($billableLines, $invoice, $thirdparty, $mysoc, $sign = 1.0, &$buildWarnings = [])
+function lemonfacturx_get_tax_breakdown($prepared, $invoice, $sign = 1.0, &$buildWarnings = [])
 {
 	$breakdown = [];
-	foreach ($billableLines as $line) {
-		$rate = (float) $line->tva_tx;
-		$taxCat = lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc);
-		$key = $taxCat['code'].'|'.$rate;
+	$accumulate = function ($taxCat, $rate, $base, $tax) use (&$breakdown) {
+		$key = $taxCat['code'].'|'.(float) $rate;
 		if (!isset($breakdown[$key])) {
 			$breakdown[$key] = [
 				'base'         => 0.0,
 				'tax'          => 0.0,
-				'rate'         => $rate,
+				'rate'         => (float) $rate,
 				'categoryCode' => $taxCat['code'],
 				'exemption'    => $taxCat['exemption'],
 				'vatex'        => $taxCat['vatex'],
 			];
 		}
-		// Bases accumulées sur les totaux de ligne arrondis (cohérence BR-S-08 :
-		// base par catégorie = somme des lignes - remises de la catégorie, les
-		// remises BG-21 provenant des mêmes lignes négatives).
-		$breakdown[$key]['base'] += round($sign * (float) $line->total_ht, 2);
-		$breakdown[$key]['tax']  += $sign * (float) $line->total_tva;
+		$breakdown[$key]['base'] += $base;
+		$breakdown[$key]['tax'] += $tax;
+	};
+
+	foreach ($prepared['lines'] as $pl) {
+		$accumulate($pl['taxCat'], $pl['vatRate'], $pl['lineTotal'], $pl['lineTax']);
+	}
+	foreach ($prepared['allowances'] as $al) {
+		$accumulate($al['taxCat'], $al['rate'], -$al['amount'], $al['tax']);
 	}
 
 	// Arrondi des taxes par groupe puis réconciliation avec le total facture
@@ -661,6 +669,22 @@ function lemonfacturx_get_tax_breakdown($billableLines, $invoice, $thirdparty, $
 		}
 	}
 
+	// Garde-fou BR-CO-17 : la taxe d'un groupe ne doit pas s'écarter de plus
+	// d'un centime de base x taux (rejet Schematron sinon). Si l'imputation
+	// ci-dessus (ou des arrondis ligne à ligne cumulés) dépasse la tolérance,
+	// on recale la taxe du groupe sur sa base — la priorité va à la validité
+	// EN16931 du XML, l'écart avec les totaux Dolibarr est signalé en aval.
+	foreach ($breakdown as $key => $b) {
+		if ($b['rate'] <= 0) {
+			continue;
+		}
+		$expected = round($b['base'] * $b['rate'] / 100, 2);
+		if (abs($b['tax'] - $expected) > 0.01) {
+			$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnTaxRecomputed', $b['categoryCode'].' '.$b['rate'].'%', lemonfacturx_format_amount($expected), lemonfacturx_format_amount($b['tax']));
+			$breakdown[$key]['tax'] = $expected;
+		}
+	}
+
 	return $breakdown;
 }
 
@@ -675,7 +699,6 @@ function lemonfacturx_get_tax_breakdown($billableLines, $invoice, $thirdparty, $
 function lemonfacturx_check_mandatory($invoice, $mysoc)
 {
 	$warnings = [];
-	$prefix   = 'Factur-X : ';
 
 	$sellerChecks = [
 		'name'      => 'LemonFacturXWarnSellerName',
@@ -692,22 +715,25 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 			continue;
 		}
 		if (empty($mysoc->$field)) {
-			$warnings[] = $prefix.lemonfacturx_trans($transKey);
+			$warnings[] = lemonfacturx_trans($transKey);
 		}
 	}
 
+	// SIREN/SIRET : identifiants français — mêmes règles de pays que le générateur
+	$sellerIsFR = strtoupper(!empty($mysoc->country_code) ? $mysoc->country_code : 'FR') === 'FR';
+
 	// BT-34 (adresse électronique vendeur) : satisfaite par le SIREN (endpoint 0225)
 	// OU l'email. On n'avertit que si aucune des deux n'est disponible.
-	$sellerSiren = lemonfacturx_extract_siren($mysoc->idprof2 ?? '');
+	$sellerSiren = $sellerIsFR ? lemonfacturx_extract_siren($mysoc->idprof2 ?? '') : '';
 	if ($sellerSiren === '' && empty($mysoc->email)) {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnSellerEndpoint');
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnSellerEndpoint');
 	}
 
 	// Chorus Pro / B2G : le SIRET vendeur (BT-30) doit faire exactement 14 chiffres.
 	// Un SIREN à 9 chiffres passe la validation EN16931 mais est rejeté par Chorus Pro.
-	$sellerSiret = preg_replace('/[^0-9]/', '', $mysoc->idprof2 ?? '');
+	$sellerSiret = $sellerIsFR ? preg_replace('/[^0-9]/', '', $mysoc->idprof2 ?? '') : '';
 	if ($sellerSiret !== '' && strlen($sellerSiret) !== 14) {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnSellerSIRETLen', strlen($sellerSiret));
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnSellerSIRETLen', strlen($sellerSiret));
 	}
 
 	$buyer = $invoice->thirdparty;
@@ -719,36 +745,36 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 	];
 	foreach ($buyerChecks as $field => $transKey) {
 		if (empty($buyer->$field)) {
-			$warnings[] = $prefix.lemonfacturx_trans($transKey);
+			$warnings[] = lemonfacturx_trans($transKey);
 		}
 	}
 
 	// BT-49 (adresse électronique acheteur) : satisfaite par le SIREN (endpoint 0225)
 	// OU l'email. Pour un acheteur FR, l'absence de SIREN empêche le routage PA/PDP,
 	// même si un email est présent (un email n'est pas routable sur le réseau).
-	$buyerSiren = lemonfacturx_extract_siren($buyer->idprof2 ?? '');
-	$buyerEmail = lemonfacturx_get_buyer_email($buyer, $invoice->db);
 	$buyerIsFR  = strtoupper(!empty($buyer->country_code) ? $buyer->country_code : 'FR') === 'FR';
+	$buyerSiren = $buyerIsFR ? lemonfacturx_extract_siren($buyer->idprof2 ?? '') : '';
+	$buyerEmail = lemonfacturx_get_buyer_email($buyer, $invoice->db);
 	if ($buyerSiren === '' && $buyerEmail === '') {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnBuyerEndpoint');
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerEndpoint');
 	} elseif ($buyerSiren === '' && $buyerIsFR) {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnBuyerSIRENRouting');
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerSIRENRouting');
 	}
 
 	// BT-47 acheteur : si un SIRET est renseigné, il doit faire 14 chiffres (Chorus Pro).
-	$buyerSiret = preg_replace('/[^0-9]/', '', $buyer->idprof2 ?? '');
+	$buyerSiret = $buyerIsFR ? preg_replace('/[^0-9]/', '', $buyer->idprof2 ?? '') : '';
 	if ($buyerSiret !== '' && strlen($buyerSiret) !== 14) {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnBuyerSIRETLen', strlen($buyerSiret));
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerSIRETLen', strlen($buyerSiret));
 	}
 
 	if (getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT') <= 0) {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnNoBank');
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnNoBank');
 	}
 
 	// PDF/A-3 : sans police embarquée forcée, le PDF TCPDF utilise les polices
 	// base-14 non embarquées et échoue à la validation veraPDF.
 	if (function_exists('getDolGlobalString') && getDolGlobalString('MAIN_PDF_FORCE_FONT', '') === '') {
-		$warnings[] = $prefix.lemonfacturx_trans('LemonFacturXWarnNoForceFont');
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnNoForceFont');
 	}
 
 	return $warnings;
@@ -766,8 +792,13 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email)
 	$tag = ($role === 'Seller') ? 'SellerTradeParty' : 'BuyerTradeParty';
 	$country = !empty($party->country_code) ? $party->country_code : 'FR';
 	$vat     = $party->tva_intra ?? '';
-	$siren   = lemonfacturx_extract_siren($party->idprof2 ?? '');
-	$siret   = preg_replace('/[^0-9]/', '', $party->idprof2 ?? '');
+	// SIREN/SIRET : identifiants français uniquement. Pour un tiers étranger,
+	// idprof2 contient un identifiant local (HRB allemand, CRN...) qui ne doit
+	// surtout pas être publié sous un scheme SIREN/SIRET (0002/0009/0225) —
+	// l'endpoint retombe alors sur l'email (EM).
+	$isFR    = (strtoupper($country) === 'FR');
+	$siren   = $isFR ? lemonfacturx_extract_siren($party->idprof2 ?? '') : '';
+	$siret   = $isFR ? preg_replace('/[^0-9]/', '', $party->idprof2 ?? '') : '';
 
 	// BT-30 (vendeur) / BT-47 (acheteur) : identifiant légal, configurable.
 	// ISO 6523 : 0002 = SIREN (9 chiffres), 0009 = SIRET (14 chiffres).
@@ -950,13 +981,15 @@ function lemonfacturx_resolve_tax_category($line, $invoice, $thirdparty, $mysoc)
 	// française, pas une opération hors champ EU). BR-E-09 demande un identifiant
 	// fiscal vendeur : assuré par SpecifiedTaxRegistration schemeID="FC" (SIREN) dans
 	// lemonfacturx_build_trade_party_xml() quand tva_intra est vide.
-	if (isset($mysoc->tva_assuj) && (int) $mysoc->tva_assuj === 0) {
-		return ['code' => 'E', 'exemption' => 'TVA non applicable, art. 293 B du CGI', 'vatex' => 'VATEX-FR-FRANCHISE'];
-	}
-
-	// TVA > 0 : standard
+	// TVA > 0 : standard — prioritaire sur le statut franchise, car une ligne
+	// qui porte réellement de la TVA (ex. ancienne facture régénérée après un
+	// passage en franchise) en catégorie E violerait BR-E-05 (taux non nul).
 	if ((float) $line->tva_tx > 0) {
 		return ['code' => 'S', 'exemption' => null, 'vatex' => null];
+	}
+
+	if (isset($mysoc->tva_assuj) && (int) $mysoc->tva_assuj === 0) {
+		return ['code' => 'E', 'exemption' => 'TVA non applicable, art. 293 B du CGI', 'vatex' => 'VATEX-FR-FRANCHISE'];
 	}
 
 	// TVA = 0 : qualifier selon le contexte
@@ -1203,6 +1236,57 @@ function lemonfacturx_get_buyer_email($buyer, $db)
 	}
 	$obj = $db->fetch_object($res);
 	return ($obj && !empty($obj->email)) ? $obj->email : '';
+}
+
+/**
+ * Résout le chemin du PDF principal d'une facture, ou null s'il n'existe pas.
+ * Convention Dolibarr : <dir_entité>/<ref>/<ref>.pdf ; repli sur last_main_doc
+ * (chemin relatif à DOL_DATA_ROOT) si le fichier conventionnel est absent.
+ *
+ * @param string $ref          Référence de la facture
+ * @param int    $entity       Entité de la facture (multicompany)
+ * @param string $lastMainDoc  Valeur de llx_facture.last_main_doc (optionnel)
+ * @return string|null
+ */
+function lemonfacturx_invoice_pdf_path($ref, $entity, $lastMainDoc = '')
+{
+	global $conf;
+
+	$dir = !empty($conf->facture->multidir_output[$entity])
+		? $conf->facture->multidir_output[$entity]
+		: ($conf->facture->dir_output ?? '');
+	if (!empty($dir)) {
+		$safeRef = dol_sanitizeFileName($ref);
+		$path = $dir.'/'.$safeRef.'/'.$safeRef.'.pdf';
+		if (file_exists($path)) {
+			return $path;
+		}
+	}
+	if (!empty($lastMainDoc) && defined('DOL_DATA_ROOT')) {
+		$candidate = DOL_DATA_ROOT.'/'.ltrim($lastMainDoc, '/');
+		if (file_exists($candidate)) {
+			return $candidate;
+		}
+	}
+	return null;
+}
+
+/**
+ * Extrait le XML Factur-X embarqué dans un PDF (lecture seule, in-process :
+ * le Reader atgp repose sur smalot/pdfparser, sans conflit FPDF/TCPDF).
+ *
+ * @param string $pdfPath Chemin du PDF
+ * @return string|null    XML, ou null si absent/illisible
+ */
+function lemonfacturx_extract_xml_from_pdf($pdfPath)
+{
+	require_once dirname(__DIR__, 2).'/vendor/autoload.php';
+	try {
+		$reader = new \Atgp\FacturX\Reader();
+		return $reader->extractXML((string) file_get_contents($pdfPath), false);
+	} catch (\Throwable $e) {
+		return null;
+	}
 }
 
 /**

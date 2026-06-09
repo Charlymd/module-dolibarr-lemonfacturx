@@ -32,10 +32,10 @@ class modLemonFacturX extends DolibarrModules
 		$this->editor_name = 'Lemon';
 		$this->editor_url = 'https://hellolemon.fr';
 
-		// Prérequis vérifiés à l'activation (le README annonce PHP 8.1+ /
-		// Dolibarr 16+ minimum ; testé sur Dolibarr 22 / PHP 8.2)
+		// Prérequis vérifiés à l'activation. Dolibarr 19 minimum : le module
+		// utilise GETPOSTINT() (introduit en 19.0) ; testé sur Dolibarr 22 / PHP 8.2.
 		$this->phpmin = array(8, 1);
-		$this->need_dolibarr_version = array(16, 0);
+		$this->need_dolibarr_version = array(19, 0);
 
 		$this->module_parts = array(
 			'triggers' => 0,

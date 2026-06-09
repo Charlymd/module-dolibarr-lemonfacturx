@@ -23,12 +23,11 @@ ne permet pas de garantir les règles BR-CO-* aujourd'hui. Le diagnostic admin
 affiche une note si le module Multidevise est actif.
 
 ### Taxes locales (localtax1/localtax2)
-**Comportement : warning + totaux XML cohérents EN16931.**
+**Comportement : refus propre.**
 EN16931 ne représente que la TVA. Les taxes parafiscales locales (IRPF
-espagnol, RECARGO, etc.) ne sont pas mappables. Le XML privilégie la cohérence
-interne (BR-CO-15 : grand total = base + TVA), donc son total peut différer du
-TTC Dolibarr ; l'écart est signalé par warning. Hors périmètre France
-métropolitaine, qui est la cible du module.
+espagnol, RECARGO, etc.) ne sont pas mappables : le total du XML divergerait
+du TTC visible sur le PDF — même principe de refus que le multidevise. Hors
+périmètre France métropolitaine, qui est la cible du module.
 
 ### Factures de situation (BTP)
 **Comportement : warning, émission en TypeCode 380.**

@@ -67,22 +67,12 @@ function lfx_xp_str($xp, $query)
 
 function lfx_check_xsd($xml, $xsdPath)
 {
-	libxml_use_internal_errors(true);
-	libxml_clear_errors();
-	$dom = new DOMDocument();
-	if (!$dom->loadXML($xml)) {
-		return 'XML mal formé';
-	}
+	// Même implémentation que la production (core/lib/lemonfacturx_rules.php) :
+	// les tests valident le code réellement exécuté par le hook.
 	if (!file_exists($xsdPath)) {
 		return 'XSD absent';
 	}
-	if (!$dom->schemaValidate($xsdPath)) {
-		$errs = libxml_get_errors();
-		libxml_clear_errors();
-		return !empty($errs) ? trim($errs[0]->message) : 'violation inconnue';
-	}
-	libxml_clear_errors();
-	return null;
+	return lemonfacturx_validate_xsd($xml, dirname(__DIR__));
 }
 
 /**
@@ -514,6 +504,52 @@ foreach ($violations as $v) {
 lfx_assert($hasBr27, 'BR-27 détectée');
 lfx_assert(!empty($w), 'warning facture entièrement négative émis');
 echo "U17 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U19 franchise avec TVA réelle -> S (pas E contradictoire)';
+lfx_reset();
+$mysocFranchise2 = lfx_make_party(['name' => 'EX-MICRO', 'idprof2' => '90945830600012', 'tva_intra' => 'FR38909458306', 'tva_assuj' => 0]);
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0017';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00)]; // ancienne facture régénérée après passage en franchise
+$inv->total_ht = 1000.00;
+$inv->total_tva = 200.00;
+$inv->total_ttc = 1200.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysocFranchise2, $w);
+lfx_std_validate($xml, $xsdPath);
+$xp = lfx_xpath($xml);
+lfx_assert_eq('S', lfx_xp_str($xp, '//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:CategoryCode'), 'ligne avec TVA réelle reste en S (BR-E-05)');
+echo "U19 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U20 acheteur étranger : idprof2 non publié en SIREN/SIRET';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0018';
+$inv->thirdparty = lfx_make_party(['country_code' => 'DE', 'tva_intra' => 'DE129273398', 'idprof2' => 'HRB 123456789']);
+$inv->lines = [lfx_make_line(2000.00, 0.0, 0.00, 1.0, 'Marchandise', 0)];
+$inv->total_ht = 2000.00;
+$inv->total_tva = 0.00;
+$inv->total_ttc = 2000.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+lfx_std_validate($xml, $xsdPath);
+$xp = lfx_xpath($xml);
+lfx_assert_eq(0, $xp->query('//ram:BuyerTradeParty/ram:SpecifiedLegalOrganization')->length, 'pas de SpecifiedLegalOrganization avec un identifiant local étranger');
+lfx_assert_eq('EM', lfx_xp_str($xp, '//ram:BuyerTradeParty/ram:URIUniversalCommunication/ram:URIID/@schemeID'), 'endpoint en repli email (pas de faux SIREN 0225)');
+echo "U20 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U21 taxes locales refusées proprement';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->total_localtax1 = 12.50;
+lfx_assert(lemonfacturx_check_supported($inv) !== null, 'localtax détectée comme non supportée');
+$inv->total_localtax1 = 0.0;
+lfx_assert(lemonfacturx_check_supported($inv) === null, 'sans localtax : supporté');
+echo "U21 OK\n";
 
 // ---------------------------------------------------------------------------
 $currentTest = 'U18 fonctions de formatage';

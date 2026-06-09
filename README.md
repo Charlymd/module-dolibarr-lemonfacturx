@@ -8,7 +8,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Prérequis
 
-- **Dolibarr** 16.0+ (testé sur 22.0.x) — vérifié à l'activation (`need_dolibarr_version`)
+- **Dolibarr** 19.0+ (testé sur 22.0.x) — vérifié à l'activation (`need_dolibarr_version`)
 - **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
 - **Fonction `exec()`** activée (subprocess d'injection PDF) — vérifiée par le diagnostic
 - **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
@@ -89,7 +89,7 @@ lemonfacturx/
 
 Le module se branche sur le hook `afterPDFCreation` (contexte `pdfgeneration`). À chaque génération de PDF facture client :
 
-1. **Contrôle du périmètre** : multidevise et données impossibles → refus propre (PDF classique conservé)
+1. **Contrôle du périmètre** : multidevise, taxes locales (localtax) et données impossibles → refus propre (PDF classique conservé)
 2. **Vérification** des infos obligatoires (vendeur, acheteur, IBAN, police PDF/A) — warnings consolidés
 3. **Génération du XML** CrossIndustryInvoice EN16931 avec les données de la facture Dolibarr
 4. **Validation interne** : well-formed + XSD EN16931 + **règles métier BR-\*** (sous-ensemble Schematron en PHP)
@@ -314,7 +314,8 @@ Refonte de conformité majeure — **lire les changements de comportement avant 
 - **Intracom (K)** : pays de livraison ShipTo (BR-IC-12) et date de livraison (BR-IC-11) émis ; distinction **K (biens) / AE (services art. 196)** par `product_type`.
 - **BR-61** : bloc moyen de paiement omis si virement sans IBAN configuré (au lieu d'un XML rejeté).
 - **Ventilation TVA par (catégorie, taux)** + réconciliation des arrondis avec les totaux facture (BR-CO-14/17) ; totaux BG-22 recalculés de bas en haut (BR-CO-10..16).
-- **Multidevise** : détectée et refusée proprement (le XML divergeait silencieusement du PDF).
+- **Multidevise et taxes locales** : détectées et refusées proprement (le XML divergeait silencieusement du PDF visible).
+- **SIREN/SIRET réservés aux tiers français** : l'identifiant local d'un tiers étranger (HRB allemand...) n'est plus publié sous un scheme SIREN/SIRET — repli email pour l'endpoint.
 
 **Changements de comportement** :
 - **BT-30/BT-47** : identifiant légal par défaut **SIRET sous schemeID 0009** (conforme ISO 6523, accepté Chorus Pro). L'ancien comportement (SIRET sous 0002) reste disponible : `LEMONFACTURX_LEGAL_ID_SCHEME=siret0002`.

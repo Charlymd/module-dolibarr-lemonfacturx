@@ -45,8 +45,9 @@ if (!$loaded) {
 
 require_once DOL_DOCUMENT_ROOT.'/compta/facture/class/facture.class.php';
 require_once __DIR__.'/../core/lib/lemonfacturx.lib.php';
+require_once __DIR__.'/../core/lib/lemonfacturx_rules.php';
 
-$xsdPath = __DIR__.'/../vendor/atgp/factur-x/xsd/factur-x/en16931/Factur-X_1.08_EN16931.xsd';
+$modulePath = dirname(__DIR__);
 
 $cases = [
 	1  => ['ref' => 'F001 standard FR 20%',    'typeCode' => '380', 'mainCategory' => 'S',  'unitCode' => 'C62', 'buyerUri' => true,  'buyerUriScheme' => '0225', 'exemption' => false, 'prepaid' => null, 'due' => 1200.00],
@@ -103,8 +104,9 @@ foreach ($cases as $id => $c) {
 	$categories = array_unique($mCat[1] ?? []);
 	preg_match_all('#unitCode="([A-Z0-9]+)"#', $xml, $mUnit);
 	$units = array_unique($mUnit[1] ?? []);
-	$prepaid = getXmlSingleMatch('#<ram:TotalPrepaidAmount>([0-9.]+)</ram:TotalPrepaidAmount>#', $xml);
-	$due = getXmlSingleMatch('#<ram:DuePayableAmount>([0-9.]+)</ram:DuePayableAmount>#', $xml);
+	// Signe accepté : depuis la 3.0.0, DuePayableAmount n'est plus écrêté à zéro
+	$prepaid = getXmlSingleMatch('#<ram:TotalPrepaidAmount>(-?[0-9.]+)</ram:TotalPrepaidAmount>#', $xml);
+	$due = getXmlSingleMatch('#<ram:DuePayableAmount>(-?[0-9.]+)</ram:DuePayableAmount>#', $xml);
 	preg_match_all('#<ram:ExemptionReason>([^<]+)</ram:ExemptionReason>#', $xml, $mEx);
 	$hasExemption = !empty($mEx[1]);
 	$buyerBlock = '';
@@ -124,20 +126,14 @@ foreach ($cases as $id => $c) {
 	assertEquals($c['prepaid'] === null ? null : (float) $c['prepaid'], $prepaid === null ? null : (float) $prepaid, 'TotalPrepaidAmount', $pass, $fail, $caseFailures, $id);
 	assertEquals((float) $c['due'], $due === null ? null : (float) $due, 'DuePayableAmount', $pass, $fail, $caseFailures, $id);
 
-	// Validation XSD
-	libxml_use_internal_errors(true);
-	libxml_clear_errors();
-	$dom = new DOMDocument();
-	$xsdOk = $dom->loadXML($xml) && file_exists($xsdPath) && $dom->schemaValidate($xsdPath);
-	if (!$xsdOk) {
-		$errs = libxml_get_errors();
-		$err = !empty($errs) ? trim($errs[0]->message) : 'unknown';
-		$caseFailures[] = sprintf("F%03d XSD validation KO : %s", $id, $err);
+	// Validation XSD : même implémentation que la production (lemonfacturx_rules.php)
+	$xsdError = lemonfacturx_validate_xsd($xml, $modulePath);
+	if ($xsdError !== null) {
+		$caseFailures[] = sprintf("F%03d XSD validation KO : %s", $id, $xsdError);
 		$fail++;
 	} else {
 		$pass++;
 	}
-	libxml_clear_errors();
 
 	$totalPassed += $pass;
 	$totalFailed += $fail;

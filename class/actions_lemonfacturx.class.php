@@ -218,7 +218,7 @@ class ActionsLemonFacturX
 	 */
 	public function doActions($parameters, &$object, &$action, $hookmanager)
 	{
-		global $user, $langs, $mysoc;
+		global $conf, $user, $langs, $mysoc;
 
 		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
 			return 0;
@@ -248,8 +248,22 @@ class ActionsLemonFacturX
 			}
 			// La régénération du PDF re-déclenche afterPDFCreation (et donc
 			// l'injection Factur-X) : c'est le chemin nominal du module.
+			// Mêmes conventions que l'action builddoc du cœur : langue du tiers
+			// (MAIN_MULTILANGS) et flags de masquage, pour ne pas écraser le PDF
+			// client avec une version dans la langue de l'agent.
 			$model = !empty($object->model_pdf) ? $object->model_pdf : getDolGlobalString('FACTURE_ADDON_PDF', 'sponge');
-			$res = $object->generateDocument($model, $langs);
+			if (empty($object->thirdparty) || !is_object($object->thirdparty)) {
+				$object->fetch_thirdparty();
+			}
+			$outputlangs = $langs;
+			if (getDolGlobalInt('MAIN_MULTILANGS') && !empty($object->thirdparty->default_lang)) {
+				$outputlangs = new Translate('', $conf);
+				$outputlangs->setDefaultLang($object->thirdparty->default_lang);
+			}
+			$hidedetails = getDolGlobalInt('MAIN_GENERATE_DOCUMENTS_HIDE_DETAILS');
+			$hidedesc = getDolGlobalInt('MAIN_GENERATE_DOCUMENTS_HIDE_DESC');
+			$hideref = getDolGlobalInt('MAIN_GENERATE_DOCUMENTS_HIDE_REF');
+			$res = $object->generateDocument($model, $outputlangs, $hidedetails, $hidedesc, $hideref);
 			if ($res <= 0) {
 				setEventMessages($langs->trans('LemonFacturXMsgRegenerateFailed').' : '.$object->error, null, 'errors');
 			}
@@ -286,13 +300,8 @@ class ActionsLemonFacturX
 			return;
 		}
 
-		// L'extraction (atgp Reader) repose sur smalot/pdfparser uniquement :
-		// pas de conflit FPDF/TCPDF, exécutable dans le process Dolibarr.
-		require_once $modulePath.'/vendor/autoload.php';
-		try {
-			$reader = new \Atgp\FacturX\Reader();
-			$xml = $reader->extractXML((string) file_get_contents($pdfPath), false);
-		} catch (\Throwable $e) {
+		$xml = lemonfacturx_extract_xml_from_pdf($pdfPath);
+		if ($xml === null) {
 			setEventMessages($langs->trans('LemonFacturXMsgNoFacturX', basename($pdfPath)), null, 'warnings');
 			return;
 		}
@@ -326,15 +335,7 @@ class ActionsLemonFacturX
 		global $conf;
 
 		$entity = $invoice->entity ?? $conf->entity;
-		$dir = !empty($conf->facture->multidir_output[$entity])
-			? $conf->facture->multidir_output[$entity]
-			: ($conf->facture->dir_output ?? '');
-		if (empty($dir)) {
-			return null;
-		}
-		$ref = dol_sanitizeFileName($invoice->ref);
-		$path = $dir.'/'.$ref.'/'.$ref.'.pdf';
-		return file_exists($path) ? $path : null;
+		return lemonfacturx_invoice_pdf_path($invoice->ref, $entity, (string) ($invoice->last_main_doc ?? ''));
 	}
 
 	/**
@@ -354,6 +355,11 @@ class ActionsLemonFacturX
 		}
 
 		$cmd = escapeshellarg($veraPath).' -f 3b --format text '.escapeshellarg($pdfFile).' 2>&1';
+		// veraPDF est une CLI JVM : borne de 60s pour qu'un process bloqué ne
+		// gèle pas la requête web (max_execution_time ne compte pas l'exec).
+		if (is_executable('/usr/bin/timeout')) {
+			$cmd = '/usr/bin/timeout 60 '.$cmd;
+		}
 		$output = [];
 		$returnCode = 0;
 		exec($cmd, $output, $returnCode);
@@ -500,41 +506,13 @@ class ActionsLemonFacturX
 	 */
 	protected function validateXml($xml, $modulePath)
 	{
-		if (empty($xml)) {
-			return 'XML vide';
-		}
-
-		libxml_use_internal_errors(true);
-		libxml_clear_errors();
-
-		$dom = new DOMDocument();
-		if (!$dom->loadXML($xml)) {
-			return 'XML mal formé : '.$this->consumeFirstLibxmlError('XML mal formé');
-		}
-
+		// Implémentation partagée avec les suites de tests : les tests valident
+		// le même code que la production (cf. core/lib/lemonfacturx_rules.php).
+		require_once $modulePath.'/core/lib/lemonfacturx_rules.php';
 		$xsdPath = $modulePath.'/vendor/atgp/factur-x/xsd/factur-x/en16931/Factur-X_1.08_EN16931.xsd';
 		if (!file_exists($xsdPath)) {
-			// Absence du XSD embarqué : on ne bloque pas, on a déjà vérifié le well-formed
-			dol_syslog('LemonFacturX: XSD EN16931 absent de vendor/, validation structurelle sautée', LOG_WARNING);
-			libxml_clear_errors();
-			return null;
+			dol_syslog('LemonFacturX: XSD EN16931 absent de vendor/, validation structurelle limitée au well-formed', LOG_WARNING);
 		}
-
-		if (!$dom->schemaValidate($xsdPath)) {
-			return 'non conforme XSD EN16931 : '.$this->consumeFirstLibxmlError('violation de contrainte inconnue');
-		}
-
-		libxml_clear_errors();
-		return null;
-	}
-
-	/**
-	 * Récupère le premier message d'erreur libxml et vide le buffer.
-	 */
-	protected function consumeFirstLibxmlError($fallback)
-	{
-		$errs = libxml_get_errors();
-		libxml_clear_errors();
-		return !empty($errs) ? trim($errs[0]->message) : $fallback;
+		return lemonfacturx_validate_xsd($xml, $modulePath);
 	}
 }

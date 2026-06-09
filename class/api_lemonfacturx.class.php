@@ -82,14 +82,10 @@ class LemonfacturxApi extends DolibarrApi
 		$invoice = $this->loadInvoice($id);
 
 		$modulePath = dirname(__DIR__);
+		require_once $modulePath.'/core/lib/lemonfacturx.lib.php';
 		require_once $modulePath.'/core/lib/lemonfacturx_rules.php';
 
-		$entity = $invoice->entity ?? $conf->entity;
-		$dir = !empty($conf->facture->multidir_output[$entity])
-			? $conf->facture->multidir_output[$entity]
-			: ($conf->facture->dir_output ?? '');
-		$ref = dol_sanitizeFileName($invoice->ref);
-		$pdfPath = $dir.'/'.$ref.'/'.$ref.'.pdf';
+		$pdfPath = lemonfacturx_invoice_pdf_path($invoice->ref, $invoice->entity ?? $conf->entity, (string) ($invoice->last_main_doc ?? ''));
 
 		$result = [
 			'ref'            => $invoice->ref,
@@ -97,16 +93,13 @@ class LemonfacturxApi extends DolibarrApi
 			'facturx_found'  => false,
 			'br_violations'  => [],
 		];
-		if (!file_exists($pdfPath)) {
+		if ($pdfPath === null) {
 			return $result;
 		}
 		$result['pdf_exists'] = true;
 
-		require_once $modulePath.'/vendor/autoload.php';
-		try {
-			$reader = new \Atgp\FacturX\Reader();
-			$xml = $reader->extractXML((string) file_get_contents($pdfPath), false);
-		} catch (\Throwable $e) {
+		$xml = lemonfacturx_extract_xml_from_pdf($pdfPath);
+		if ($xml === null) {
 			return $result;
 		}
 		$result['facturx_found'] = true;
@@ -124,6 +117,9 @@ class LemonfacturxApi extends DolibarrApi
 	 */
 	protected function loadInvoice($id)
 	{
+		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
+			throw new RestException(403, 'LemonFacturX conversion is disabled (LEMONFACTURX_ENABLED=0)');
+		}
 		if (!DolibarrApiAccess::$user->hasRight('facture', 'lire')) {
 			throw new RestException(403, 'Insufficient rights to read invoices');
 		}

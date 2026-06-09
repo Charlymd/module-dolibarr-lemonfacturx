@@ -53,12 +53,13 @@ if (!$loaded) {
 	exit(2);
 }
 
-require_once __DIR__.'/../vendor/autoload.php';
+require_once __DIR__.'/../core/lib/lemonfacturx.lib.php';
 
-$sql = "SELECT rowid, ref, datef FROM ".MAIN_DB_PREFIX."facture"
+$sql = "SELECT rowid, ref, datef, entity, last_main_doc FROM ".MAIN_DB_PREFIX."facture"
 	." WHERE fk_statut >= 1 AND entity IN (".getEntity('invoice').")";
 if ($year > 0) {
-	$sql .= " AND YEAR(datef) = ".((int) $year);
+	// Borne par dates plutôt que YEAR() : portable MySQL/MariaDB/PostgreSQL
+	$sql .= " AND datef >= '".((int) $year)."-01-01' AND datef <= '".((int) $year)."-12-31'";
 }
 $sql .= " ORDER BY datef ASC, rowid ASC";
 
@@ -68,7 +69,6 @@ if (!$res) {
 	exit(2);
 }
 
-$reader = new \Atgp\FacturX\Reader();
 $counts = ['OK' => 0, 'NO_PDF' => 0, 'NO_XML' => 0];
 
 echo "=== LemonFacturX - Export batch des XML Factur-X ===\n";
@@ -76,27 +76,24 @@ echo "Destination : $destDir".($year > 0 ? " | Année : $year" : '')."\n\n";
 
 while ($obj = $db->fetch_object($res)) {
 	$ref = $obj->ref;
-	$safeRef = dol_sanitizeFileName($ref);
-	$entity = $conf->entity;
-	$dir = !empty($conf->facture->multidir_output[$entity])
-		? $conf->facture->multidir_output[$entity]
-		: ($conf->facture->dir_output ?? '');
-	$pdfPath = $dir.'/'.$safeRef.'/'.$safeRef.'.pdf';
+	// Entité de la facture (et non l'entité courante) : en multicompany avec
+	// partage, le PDF vit dans le répertoire documents de SON entité.
+	$pdfPath = lemonfacturx_invoice_pdf_path($ref, (int) $obj->entity, (string) ($obj->last_main_doc ?? ''));
 
-	if (!file_exists($pdfPath)) {
+	if ($pdfPath === null) {
 		$counts['NO_PDF']++;
 		printf("%-20s NO_PDF\n", $ref);
 		continue;
 	}
 
-	try {
-		$xml = $reader->extractXML((string) file_get_contents($pdfPath), false);
-	} catch (\Throwable $e) {
+	$xml = lemonfacturx_extract_xml_from_pdf($pdfPath);
+	if ($xml === null) {
 		$counts['NO_XML']++;
-		printf("%-20s NO_XML (%s)\n", $ref, $e->getMessage());
+		printf("%-20s NO_XML\n", $ref);
 		continue;
 	}
 
+	$safeRef = dol_sanitizeFileName($ref);
 	if (file_put_contents($destDir.'/'.$safeRef.'.xml', $xml) === false) {
 		fwrite(STDERR, "ERROR: écriture impossible pour $ref\n");
 		exit(2);

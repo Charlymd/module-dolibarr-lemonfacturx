@@ -1,5 +1,13 @@
 # Spec : Support des acomptes dans LemonFacturX
 
+> **Document historique (v1.1.0)** — cette spécification a servi à implémenter
+> le support des acomptes. Les extraits de code (`xmlEncode()`,
+> `formatAmount()`, signatures à 2 arguments, écrêtage `max(0.0, ...)`) ne
+> reflètent **plus** l'implémentation actuelle : depuis la 3.0.0, les fonctions
+> sont préfixées `lemonfacturx_`, le `DuePayableAmount` n'est plus écrêté
+> (BR-CO-16) et les acomptes imputés sont référencés en BG-3. Faire foi au code
+> de `core/lib/lemonfacturx.lib.php` et à `docs/LIMITATIONS.md`.
+
 Prompt prêt à l'emploi pour une autre IA qui reprendra le patch. Rédigé par Axel (brief initial), formaté pour exécution.
 
 ## Contexte

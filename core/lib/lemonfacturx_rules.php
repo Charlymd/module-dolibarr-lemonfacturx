@@ -18,6 +18,54 @@
  */
 
 /**
+ * Valide un XML contre le XSD Factur-X EN16931 embarqué.
+ * Fonction partagée par le hook, les tests unitaires et les tests d'intégration
+ * — une seule implémentation de la validation structurelle.
+ *
+ * @param string $xml         XML à valider
+ * @param string $modulePath  Racine du module (pour localiser le XSD embarqué)
+ * @return string|null        Message d'erreur si invalide, null si OK
+ *                            (ou si le XSD est absent : well-formed seul)
+ */
+function lemonfacturx_validate_xsd($xml, $modulePath)
+{
+	if (empty($xml)) {
+		return 'XML vide';
+	}
+
+	$prevUseErrors = libxml_use_internal_errors(true);
+	libxml_clear_errors();
+
+	$firstError = function ($fallback) use ($prevUseErrors) {
+		$errs = libxml_get_errors();
+		libxml_clear_errors();
+		libxml_use_internal_errors($prevUseErrors);
+		return !empty($errs) ? trim($errs[0]->message) : $fallback;
+	};
+
+	$dom = new DOMDocument();
+	if (!$dom->loadXML($xml)) {
+		return 'XML mal formé : '.$firstError('XML mal formé');
+	}
+
+	$xsdPath = $modulePath.'/vendor/atgp/factur-x/xsd/factur-x/en16931/Factur-X_1.08_EN16931.xsd';
+	if (!file_exists($xsdPath)) {
+		// Absence du XSD embarqué : on ne bloque pas, le well-formed est vérifié
+		libxml_clear_errors();
+		libxml_use_internal_errors($prevUseErrors);
+		return null;
+	}
+
+	if (!$dom->schemaValidate($xsdPath)) {
+		return 'non conforme XSD EN16931 : '.$firstError('violation de contrainte inconnue');
+	}
+
+	libxml_clear_errors();
+	libxml_use_internal_errors($prevUseErrors);
+	return null;
+}
+
+/**
  * Valide un XML CrossIndustryInvoice contre un sous-ensemble des règles
  * métier EN16931 (BR-*, BR-CO-*, BR-S/E/K/G/AE-*, BR-IC-*).
  *
@@ -113,7 +161,20 @@ function lemonfacturx_validate_business_rules($xml)
 	$btAllowance   = $num($ms.'ram:AllowanceTotalAmount') ?? 0.0;
 	$btCharge      = $num($ms.'ram:ChargeTotalAmount') ?? 0.0;
 	$btTaxBasis    = $num($ms.'ram:TaxBasisTotalAmount');
-	$btTaxTotal    = $num($ms.'ram:TaxTotalAmount') ?? 0.0;
+	// BT-110 : EN16931 autorise deux TaxTotalAmount (devise facture BT-110 +
+	// devise de TVA BT-111) — prendre celui dont currencyID = devise facture.
+	$invoiceCurrency = $str('//ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode');
+	$btTaxTotal = null;
+	foreach ($xp->query($ms.'ram:TaxTotalAmount') as $taxTotalNode) {
+		$nodeCurrency = $taxTotalNode->getAttribute('currencyID');
+		if ($btTaxTotal === null || $nodeCurrency === $invoiceCurrency || $nodeCurrency === '') {
+			$btTaxTotal = (float) $taxTotalNode->textContent;
+			if ($nodeCurrency === $invoiceCurrency) {
+				break;
+			}
+		}
+	}
+	$btTaxTotal    = $btTaxTotal ?? 0.0;
 	$btGrandTotal  = $num($ms.'ram:GrandTotalAmount');
 	$btPrepaid     = $num($ms.'ram:TotalPrepaidAmount') ?? 0.0;
 	$btDuePayable  = $num($ms.'ram:DuePayableAmount');
