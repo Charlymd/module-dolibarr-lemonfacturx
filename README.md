@@ -108,7 +108,7 @@ Modèle de menace, protections détaillées et processus de signalement : voir [
 | BT-9 Due date | `$invoice->date_lim_reglement` |
 | Seller | `$mysoc` (config société) |
 | Buyer | `$invoice->thirdparty` |
-| Seller SIREN (BT-30) | 9 premiers chiffres de `$mysoc->idprof2` |
+| Seller SIRET (BT-30) | `$mysoc->idprof2` (SIRET complet, 14 chiffres) |
 | Seller email (BT-34) | `$mysoc->email` |
 | Buyer email (BT-49) | `$thirdparty->email` ou 1er contact (bloc omis si vide) |
 | Lines | `$invoice->lines[]` |
@@ -252,6 +252,17 @@ php tests/run-tests.php
 À lancer après toute modification de `core/lib/lemonfacturx.lib.php` pour vérifier qu'aucune régression n'a été introduite.
 
 ## Changelog
+
+### 2.1.2 (juin 2026)
+
+Correctif Chorus Pro — identifiant légal **SIRET** (et non SIREN) dans `SpecifiedLegalOrganization` :
+
+- **`<ram:SpecifiedLegalOrganization>/ID` (BT-30 vendeur / BT-47 acheteur)** : émet désormais le **SIRET complet (14 chiffres)** au lieu du SIREN (9 chiffres), `schemeID="0002"` conservé. Chorus Pro identifie les structures par leur SIRET et rejetait un SIREN à 9 chiffres : « le nombre de caractères de l'identifiant … de type identifiant (SIRET) doit être égal à 14 » et « identifiant … n'est pas référencé dans notre système » (pour le fournisseur comme pour le débiteur). Le fichier restait valide EN16931 (un SIREN y est toléré), d'où le passage des validateurs Factur-X mais le rejet à la transmission Chorus Pro.
+- **Indépendant de l'adressage de routage** : l'endpoint BT-34/BT-49 (`URIUniversalCommunication`, `schemeID="0225"`, introduit en 2.1.0) continue de porter le SIREN — c'est un champ d'*adressage*, distinct de l'*identification légale*. Les deux coexistent dans le XML.
+- **Repli fiscal inchangé** : le `SpecifiedTaxRegistration schemeID="FC"` (franchise en base, BT-32) garde le SIREN.
+- **Diagnostic** : nouvelle alerte si le SIRET de la société émettrice (BT-30) ou du tiers acheteur (BT-47) ne fait pas 14 chiffres — évite un diagnostic « tout vert » trompeur alors que Chorus Pro rejettera la facture.
+
+Aucune migration nécessaire. Vérifier que le champ SIRET de **votre société** et des **tiers publics facturés** contient bien les 14 chiffres (Configuration → Société/Organisation, et fiche tiers).
 
 ### 2.1.1 (mai 2026)
 

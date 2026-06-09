@@ -341,6 +341,14 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 		$warnings[] = $prefix.'adresse électronique de la société émettrice manquante (ni SIREN/SIRET, ni email) — obligatoire BR-FR-13 (BT-34)';
 	}
 
+	// Chorus Pro / B2G : le SIRET vendeur (BT-30) doit faire exactement 14 chiffres.
+	// Un SIREN à 9 chiffres passe la validation EN16931 mais est rejeté par Chorus Pro.
+	$sellerSiret = preg_replace('/[^0-9]/', '', $mysoc->idprof2 ?? '');
+	if ($sellerSiret !== '' && strlen($sellerSiret) !== 14) {
+		$warnings[] = $prefix.'le SIRET de la société émettrice doit comporter 14 chiffres (BT-30), '
+			.strlen($sellerSiret).' saisi(s) — un SIREN à 9 chiffres est rejeté par Chorus Pro';
+	}
+
 	$buyer = $invoice->thirdparty;
 	$buyerChecks = [
 		'name'    => 'nom du tiers acheteur manquant',
@@ -366,6 +374,13 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 		$warnings[] = $prefix.'SIREN/SIRET du tiers acheteur manquant — requis pour le routage sur le réseau des Plateformes Agréées (endpoint BT-49 schemeID 0225) ; une adresse email seule n\'est pas routable';
 	}
 
+	// BT-47 acheteur : si un SIRET est renseigné, il doit faire 14 chiffres (Chorus Pro).
+	$buyerSiret = preg_replace('/[^0-9]/', '', $buyer->idprof2 ?? '');
+	if ($buyerSiret !== '' && strlen($buyerSiret) !== 14) {
+		$warnings[] = $prefix.'le SIRET du tiers acheteur doit comporter 14 chiffres (BT-47), '
+			.strlen($buyerSiret).' saisi(s)';
+	}
+
 	if (getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT') <= 0) {
 		$warnings[] = $prefix.'aucun compte bancaire configuré dans le module';
 	}
@@ -386,12 +401,18 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email)
 	$country = !empty($party->country_code) ? $party->country_code : 'FR';
 	$vat     = $party->tva_intra ?? '';
 	$siren   = lemonfacturx_extract_siren($party->idprof2 ?? '');
+	// BT-30 (vendeur) / BT-47 (acheteur) : l'identifiant légal est le SIRET complet
+	// (14 chiffres), pas le SIREN. Chorus Pro identifie les structures par leur SIRET
+	// et rejette un SIREN à 9 chiffres (« doit être égal à 14 » / « identifiant non
+	// référencé »). On émet idprof2 nettoyé, schemeID 0002 (convention SIRENE/Chorus Pro).
+	// Distinct de l'endpoint de routage BT-34/BT-49 ci-dessous, qui porte le SIREN (0225).
+	$siret   = preg_replace('/[^0-9]/', '', $party->idprof2 ?? '');
 
 	$xml  = '    <ram:'.$tag.'>'."\n";
 	$xml .= '      <ram:Name>'.xmlEncode($party->name).'</ram:Name>'."\n";
-	if (!empty($siren)) {
+	if (!empty($siret)) {
 		$xml .= '      <ram:SpecifiedLegalOrganization>'."\n";
-		$xml .= '        <ram:ID schemeID="0002">'.xmlEncode($siren).'</ram:ID>'."\n";
+		$xml .= '        <ram:ID schemeID="0002">'.xmlEncode($siret).'</ram:ID>'."\n";
 		$xml .= '      </ram:SpecifiedLegalOrganization>'."\n";
 	}
 	$xml .= '      <ram:PostalTradeAddress>'."\n";
