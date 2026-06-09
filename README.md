@@ -1,6 +1,6 @@
 # LemonFacturX
 
-**Version 2.1.2** — Module Dolibarr pour la génération automatique de factures **Factur-X EN16931** (PDF/A-3 avec XML CrossIndustryInvoice embarqué).
+**Version 3.0.0** — Module Dolibarr pour la génération automatique de factures **Factur-X EN16931** (PDF/A-3 avec XML CrossIndustryInvoice embarqué).
 
 Chaque facture client générée dans Dolibarr est automatiquement convertie au format Factur-X, conforme aux règles **BR-FR** (norme XP Z12-012 V1.2.0) pour la facturation électronique française.
 
@@ -8,10 +8,10 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Prérequis
 
-- **Dolibarr** 22.0.x
-- **PHP** 8.2+
-- **Fonction `exec()`** activée (subprocess d'injection PDF)
-- **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3)
+- **Dolibarr** 16.0+ (testé sur 22.0.x) — vérifié à l'activation (`need_dolibarr_version`)
+- **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
+- **Fonction `exec()`** activée (subprocess d'injection PDF) — vérifiée par le diagnostic
+- **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
 
 ## Installation
 
@@ -32,9 +32,11 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 3. Activer le module : **Accueil > Configuration > Modules**
 4. Configurer via **Accueil > Configuration > Modules > LemonFacturX** :
    - Compte bancaire (IBAN/BIC)
-   - Moyen de paiement par défaut (virement, SEPA, prélèvement)
-   - Mode de gestion d'erreur (best-effort / strict)
-   - Éventuellement chemin PHP CLI et mentions légales
+   - Moyen de paiement par défaut (virement, virement SEPA, prélèvement SEPA, prélèvement)
+   - Identifiant légal BT-30/BT-47 (SIRET 0009 par défaut)
+   - Exigibilité TVA (BT-8 : débits / encaissements), cadre de facturation (BT-23)
+   - Mode de gestion d'erreur (best-effort / strict), contrôle des règles métier
+   - Éventuellement chemin PHP CLI, chemin veraPDF et mentions légales
 5. Poser `MAIN_PDF_FORCE_FONT = pdfahelvetica` via **Accueil > Configuration > Divers**
 6. Vérifier le **diagnostic** en bas de la page de configuration du module (coches vertes = OK)
 
@@ -58,43 +60,56 @@ mv /tmp/lemonfacturx-new /var/www/html/custom/lemonfacturx
 chown -R www-data:www-data /var/www/html/custom/lemonfacturx
 ```
 
-Dolibarr ne notifie pas automatiquement des mises à jour d'un module custom. Pour rester à jour, [suivre les releases GitHub](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/releases) ou faire un `git pull` périodique si le module est versionné.
-
-Consulter la section **Changelog** en bas de ce README pour connaître les changements et migrations éventuelles.
+Dolibarr ne notifie pas automatiquement des mises à jour d'un module custom ; la page de configuration du module affiche en revanche un bandeau quand une release plus récente est publiée sur GitHub (check 24h, cache en DB). Consulter la section **Changelog** en bas de ce README pour connaître les changements et migrations éventuelles.
 
 ## Architecture
 
 ```
 lemonfacturx/
 ├── core/modules/modLemonFacturX.class.php   # Descripteur module (n° 210000)
-├── class/actions_lemonfacturx.class.php     # Hook afterPDFCreation
-├── lib/
-│   ├── xml_builder.php                      # Générateur XML EN16931
-│   └── inject_facturx.php                   # Injection PDF (subprocess)
-├── admin/setup.php                          # Page de configuration
-├── langs/fr_FR/lemonfacturx.lang            # Traductions
-└── vendor/                                  # Lib atgp/factur-x v3.0.0
+├── core/lib/
+│   ├── lemonfacturx.lib.php                 # Générateur XML EN16931
+│   └── lemonfacturx_rules.php               # Validateur règles métier (BR-*)
+├── class/
+│   ├── actions_lemonfacturx.class.php       # Hooks afterPDFCreation + invoicecard
+│   └── api_lemonfacturx.class.php           # API REST (xml / status)
+├── scripts/
+│   ├── inject_facturx.php                   # Injection PDF (subprocess, CLI only)
+│   └── export_facturx_batch.php             # Export par lot des XML embarqués
+├── admin/setup.php                          # Page de configuration + diagnostic
+├── langs/fr_FR + en_US/lemonfacturx.lang    # Traductions
+├── tests/
+│   ├── unit-tests.php                       # Tests standalone (sans Dolibarr, CI)
+│   └── run-tests.php                        # Tests d'intégration (fixtures demo/)
+├── docs/LIMITATIONS.md                      # Cas non traités et pourquoi
+└── vendor/                                  # Lib atgp/factur-x v3.3.0 + dépendances
 ```
 
 ## Fonctionnement
 
 Le module se branche sur le hook `afterPDFCreation` (contexte `pdfgeneration`). À chaque génération de PDF facture client :
 
-1. **Vérification** des infos obligatoires (vendeur, acheteur, IBAN) — affiche des warnings si incomplet
-2. **Génération du XML** CrossIndustryInvoice EN16931 avec les données de la facture Dolibarr
-3. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (subprocess séparé pour éviter le conflit FPDF/TCPDF)
+1. **Contrôle du périmètre** : multidevise et données impossibles → refus propre (PDF classique conservé)
+2. **Vérification** des infos obligatoires (vendeur, acheteur, IBAN, police PDF/A) — warnings consolidés
+3. **Génération du XML** CrossIndustryInvoice EN16931 avec les données de la facture Dolibarr
+4. **Validation interne** : well-formed + XSD EN16931 + **règles métier BR-\*** (sous-ensemble Schematron en PHP)
+5. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (subprocess séparé, écriture atomique, `AFRelationship=Alternative`)
+6. **Post-validation veraPDF** optionnelle (PDF/A-3b)
 
-L'injection se fait dans un **subprocess PHP séparé** (`inject_facturx.php`) pour éviter le conflit de classes entre FPDF (utilisé par atgp/factur-x) et TCPDF (utilisé par Dolibarr).
+Sur la **fiche facture** (facture validée), deux boutons :
+- **Vérifier Factur-X** : extrait le XML embarqué du PDF et le revalide (XSD + règles métier) — à utiliser avant envoi
+- **Régénérer Factur-X** : régénère le PDF (et donc l'injection) — utile après une mise à jour du module ou une correction de données
 
 ### Sécurité
 
-- `inject_facturx.php` est protégé contre l'accès HTTP direct (`php_sapi_name() === 'cli'`)
+- Scripts CLI (`scripts/`, `tests/`, `demo/`) protégés par `PHP_SAPI === 'cli'` **et** `.htaccess` `Require all denied`
 - `exec()` vérifié avant appel, binaire PHP CLI configurable via `LEMONFACTURX_PHP_CLI_PATH`, chemin validé par regex et `is_executable()` si absolu
-- Validation XML interne avant injection PDF (well-formed + XSD EN16931)
+- Écriture **atomique** du PDF par le subprocess (fichier temporaire + `rename()`)
+- Validation XML interne avant injection PDF (well-formed + XSD EN16931 + règles métier)
 - Mode `LEMONFACTURX_STRICT_MODE` : choisir fail-open (best-effort) vs fail-closed (strict)
-- CSRF du POST admin aligné sur `currentToken()` Dolibarr 22
-- Aucun endpoint web public exposé
-- Un seul appel HTTP sortant : check de version GitHub toutes les 24h (cache en DB)
+- CSRF sur le POST admin et sur les actions de la fiche facture (`currentToken()`)
+- API REST : droits `facture->lire` + `_checkAccessToResource()` ; boutons fiche : droits `lire`/`creer`
+- Un seul appel HTTP sortant : check de version GitHub toutes les 24h (cache en DB, échecs inclus)
 
 Modèle de menace, protections détaillées et processus de signalement : voir [SECURITY.md](SECURITY.md). Contact disclosure : **hello@hellolemon.fr**.
 
@@ -104,55 +119,62 @@ Modèle de menace, protections détaillées et processus de signalement : voir [
 |---|---|
 | BT-1 Invoice ID | `$invoice->ref` |
 | BT-2 Issue date | `$invoice->date` |
-| BT-3 Type code | 380 (standard) / 381 (avoir) / 386 (acompte) |
+| BT-3 Type code | 380 / 381 (avoir) / 384 (rectificative) / 386 (acompte) |
+| BT-8 VAT due date code | `LEMONFACTURX_VAT_DUE_DATE_TYPE` (5 débits / 72 encaissements, omis si vide) |
 | BT-9 Due date | `$invoice->date_lim_reglement` |
-| Seller | `$mysoc` (config société) |
-| Buyer | `$invoice->thirdparty` |
-| Seller SIRET (BT-30) | `$mysoc->idprof2` (SIRET complet, 14 chiffres) |
-| Seller email (BT-34) | `$mysoc->email` |
-| Buyer email (BT-49) | `$thirdparty->email` ou 1er contact (bloc omis si vide) |
-| Lines | `$invoice->lines[]` |
-| BT-130 unitCode | Mappé depuis `$line->fk_unit` vers UN/ECE Rec 20 |
-| BT-151 CategoryCode | Calculé selon contexte (S / K / G / O / E) |
+| BT-10 Buyer reference | `$invoice->ref_client` (code service / n° engagement Chorus Pro) |
+| BT-13 Order reference | Réf. de la première commande client liée |
+| BT-23 Business process | `LEMONFACTURX_BT23_PROCESS` (A1, B1, S1..., omis si vide) |
+| BT-25/BG-3 Preceding invoice | `fk_facture_source` (avoir/rectificative) + acomptes imputés |
+| Seller / Buyer | `$mysoc` / `$invoice->thirdparty` |
+| BT-30/BT-47 Legal ID | `idprof2`, schéma configurable (SIRET 0009 par défaut) |
+| BT-31/BT-32 Tax registration | `tva_intra`, ou SIREN `schemeID="FC"` (franchise en base) |
+| BT-34/BT-49 Endpoint | SIREN `schemeID="0225"` (annuaire PPF), repli email `EM` |
+| BT-72 Delivery date | `$invoice->delivery_date` si renseignée (forcée pour l'intracom K) |
+| BT-73/74 (BG-14) Period | min/max des dates de service des lignes |
+| BT-80 ShipTo country | Pays acheteur (émis pour la catégorie K, BR-IC-12) |
+| BT-89/90/91 Direct debit | RUM (RIB par défaut du tiers), ICS (`PRELEVEMENT_ICS`), IBAN débiteur — moyen 59 |
+| BG-21 Document allowances | Lignes Dolibarr à montant négatif (remises fixes) |
 | BT-113 TotalPrepaidAmount | `$invoice->getSumDepositsUsed()` si acompte imputé |
+| BT-121 VATEX | VATEX-FR-FRANCHISE / VATEX-EU-IC / VATEX-EU-AE / VATEX-EU-G |
+| BT-129 unitCode | Mappé depuis `$line->fk_unit` vers UN/ECE Rec 20 |
+| BT-146 Unit price | `total_ht/qty`, jusqu'à 4 décimales |
+| BT-151 CategoryCode | Calculé selon contexte (S / K / AE / G / E) |
 | IBAN / BIC | Compte bancaire Dolibarr sélectionné |
-| Payment means | Configurable (30=virement, 58=SEPA) |
 
 ### Types de facture supportés
-
-Le module détecte automatiquement le type documentaire EN16931 :
 
 | Cas Dolibarr | TypeCode EN16931 | Mapping |
 |---|---|---|
 | Facture standard | **380** | Commercial invoice |
-| `Facture::TYPE_CREDIT_NOTE` | **381** | Credit note (avoir) |
-| `Facture::TYPE_DEPOSIT` | **386** | Prepayment / advance invoice (acompte) |
+| `TYPE_REPLACEMENT` | **384** | Corrected invoice + référence BG-3 à la facture remplacée |
+| `TYPE_CREDIT_NOTE` | **381** | Credit note — **montants émis en positif** (BR-27), BG-3 vers la facture d'origine |
+| `TYPE_DEPOSIT` | **386** | Prepayment / advance invoice (acompte) |
+| `TYPE_SITUATION` | 380 + warning | Support partiel, voir [docs/LIMITATIONS.md](docs/LIMITATIONS.md) |
 
-Une facture finale qui impute un acompte précédemment facturé écrit automatiquement `<ram:TotalPrepaidAmount>` dans le bloc de synthèse monétaire, et `<ram:DuePayableAmount>` est ajusté en conséquence (`total_ttc − acompte imputé`, minoré à zéro si négatif).
+**Convention avoirs** : Dolibarr stocke des totaux négatifs ; EN16931 exige des montants positifs sur un 381. Depuis la 3.0.0, tous les montants d'un avoir sont inversés (`DuePayableAmount` = total positif, sans écrêtage à zéro — BR-CO-16) et la facture d'origine est référencée en BG-3 (mention obligatoire FR). Un avoir créé sans facture d'origine liée génère un warning.
+
+Une facture finale qui impute un acompte écrit `TotalPrepaidAmount` (BT-113), ajuste `DuePayableAmount` et référence la facture d'acompte en BG-3.
 
 ### Catégories TVA (BT-151)
 
-Le code résout la catégorie EN16931 selon le contexte de la ligne, plutôt que de forcer une valeur binaire :
-
-| CategoryCode | Signification | Cas déclenchant |
+| CategoryCode | VATEX (BT-121) | Cas déclenchant |
 |---|---|---|
-| **S** | Standard rate | TVA > 0 |
-| **K** | Intra-community reverse charge | Acheteur UE hors FR avec TVA intra + TVA = 0 |
-| **G** | Free export outside EU | Acheteur hors UE + TVA = 0 |
-| **O** | Outside scope of tax | Émetteur non assujetti (franchise en base, micro) |
-| **E** | Exempt from tax | TVA = 0 par défaut (exonération) |
+| **S** | — | TVA > 0 |
+| **K** | VATEX-EU-IC | Acheteur UE hors FR avec TVA intra + TVA 0 + ligne **bien** (`product_type` 0) — avec ShipTo (BT-80) et date de livraison (BR-IC-11/12) |
+| **AE** | VATEX-EU-AE | Acheteur UE hors FR avec TVA intra + TVA 0 + ligne **service** (`product_type` 1) — art. 196 directive 2006/112/CE |
+| **G** | VATEX-EU-G | Acheteur hors UE + TVA 0 |
+| **E** | VATEX-FR-FRANCHISE | Émetteur en franchise en base (293 B CGI) — SIREN publié en identifiant fiscal `FC` |
+| **E** | — | TVA 0 par défaut (exonération sans base légale déterminable, motif générique) |
 
-Les catégories K, G, O et E génèrent systématiquement un `<ram:ExemptionReason>` avec un motif humain lisible par le destinataire.
+Les catégories exonérées génèrent systématiquement un `ExemptionReason` lisible et, quand la base légale est déterminable, un code `ExemptionReasonCode` VATEX.
 
-**Catégories EN16931 non encore supportées** :
+**Cas non couverts** (autoliquidation domestique AE FR→FR, codes O/Z/L/M, etc.) : voir [docs/LIMITATIONS.md](docs/LIMITATIONS.md), qui documente chaque cas non traité et le pourquoi.
 
-| Code | Cas | Comportement actuel |
-|---|---|---|
-| **AE** | Autoliquidation domestique (sous-traitance bâtiment CGI art. 283 nonies, déchets ferreux, composants électroniques) | Retombe sur `S` si TVA > 0 ou `E` si TVA 0%. La résolution automatique nécessiterait un flag manuel par ligne ou par tiers ; patch prévu sur demande. |
-| **Z** | Zero rated (livres, presse, certaines livraisons spéciales) | Retombe sur `E`. Cas très rare en pratique. |
-| **L** / **M** | TVA Canaries / Ceuta-Melilla | Non pertinent pour la France métropolitaine, non implémenté. |
+### Remises et arrondis
 
-Pour les 99 % des cas FR + UE standard (standard rate, autoliquidation intracommunautaire, export, franchise en base, exonération simple), le mapping automatique actuel suffit.
+- **Remises fixes** (lignes Dolibarr à montant négatif) : converties en remises document **BG-21** (`SpecifiedTradeAllowanceCharge` + BT-107) — une ligne à prix négatif violerait BR-27. Les remises en % restent diluées dans les prix nets (conforme).
+- **Arrondis** : la ventilation TVA est calculée par (catégorie, taux) puis **réconciliée** avec les totaux de la facture (l'écart d'arrondi éventuel est imputé sur la catégorie principale) ; tous les totaux BG-22 sont recalculés de bas en haut pour garantir les règles BR-CO-10/11/13/14/15/16/17, y compris sur les factures à nombreuses lignes.
 
 ### Mapping unités UN/ECE
 
@@ -167,7 +189,7 @@ Les quantités de ligne utilisent le code UN/ECE Rec 20 correspondant à l'unit�
 | month | MON | | m³ (`m3`) | MTQ |
 | p, pc, pcs, u | C62 | | km | KMT |
 
-Si l'unité n'est pas mappée ou si `fk_unit` n'est pas renseigné, le code `C62` (pièce) est utilisé en fallback.
+Si l'unité n'est pas mappée ou si `fk_unit` n'est pas renseigné, le code `C62` (pièce) est utilisé en fallback. Les quantités sont émises avec jusqu'à 4 décimales.
 
 ### Mentions légales FR (BR-FR-05)
 
@@ -184,169 +206,173 @@ Toutes sont configurables via l'écran d'administration du module (**Accueil > C
 |---|---|---|---|
 | `LEMONFACTURX_ENABLED` | int | 1 | Activer/désactiver la conversion |
 | `LEMONFACTURX_BANK_ACCOUNT` | int | 0 | ID du compte bancaire Dolibarr |
-| `LEMONFACTURX_PAYMENT_MEANS` | string | 30 | Code moyen de paiement |
+| `LEMONFACTURX_PAYMENT_MEANS` | string | 30 | Code UNTDID 4461 : 30 virement, 58 virement SEPA, 59 prélèvement SEPA, 49 prélèvement |
+| `LEMONFACTURX_ENDPOINT_SCHEME` | string | 0225 | Schéma de l'endpoint BT-34/BT-49 (0225 SIREN annuaire, 0002, 0009) |
+| `LEMONFACTURX_LEGAL_ID_SCHEME` | string | siret0009 | Identifiant légal BT-30/BT-47 : `siret0009` (ISO 6523, Chorus OK), `siren0002`, `siret0002` (héritage 2.1.x) |
+| `LEMONFACTURX_VAT_DUE_DATE_TYPE` | string | *(vide)* | BT-8 : `5` débits, `72` encaissements, vide = omis |
+| `LEMONFACTURX_BT23_PROCESS` | string | *(vide)* | BT-23 cadre de facturation (A1 Chorus B2G, B1/S1/S2 réforme), vide = omis |
 | `LEMONFACTURX_STRICT_MODE` | int | 0 | 0 = best-effort (défaut), 1 = strict (voir ci-dessous) |
+| `LEMONFACTURX_BR_CHECK` | int | 1 | Contrôle interne des règles métier EN16931 avant injection |
 | `LEMONFACTURX_PHP_CLI_PATH` | string | php | Chemin vers le binaire PHP CLI (voir note ci-dessous) |
-| `LEMONFACTURX_NOTE_PMD` | text | voir ci-dessous | Mention pénalités de retard (BR-FR-05) |
-| `LEMONFACTURX_NOTE_PMT` | text | voir ci-dessous | Mention indemnité de recouvrement |
-| `LEMONFACTURX_NOTE_AAB` | text | voir ci-dessous | Mention escompte anticipé |
+| `LEMONFACTURX_VERAPDF_PATH` | string | *(vide)* | Chemin veraPDF : post-validation PDF/A-3b de chaque PDF généré (non bloquant) |
+| `LEMONFACTURX_NOTE_PMD/PMT/AAB` | text | mentions FR | Mentions légales BR-FR-05 |
 
 > **Note PHP CLI** : Le subprocess d'injection utilise `php` par défaut. Sur les serveurs avec plusieurs versions de PHP, ou si `php` n'est pas dans le PATH, configurer `LEMONFACTURX_PHP_CLI_PATH` avec le chemin complet (ex: `/usr/bin/php8.2`). Ne **pas** utiliser `PHP_BINARY` : en contexte php-fpm, cette constante pointe vers le binaire fpm et non le CLI.
+
+> **Note prélèvement SEPA (59)** : le module publie l'ICS créancier (constante Dolibarr `PRELEVEMENT_ICS`, BT-90), la RUM du mandat (RIB par défaut du tiers, BT-89) et l'IBAN débiteur (BT-91). Des warnings signalent les données manquantes.
 
 ### Mode strict vs best-effort
 
 Par défaut le module est en **best-effort** : si le XML Factur-X est invalide ou si l'injection PDF échoue, un warning est affiché à l'utilisateur et le PDF classique (sans Factur-X embarqué) est conservé. Les erreurs sont loguées dans `syslog` avec le tag `LemonFacturX`.
 
-En **mode strict** (`LEMONFACTURX_STRICT_MODE=1`), la même situation retourne une erreur bloquante visible à l'utilisateur. À utiliser quand la conformité Factur-X est impérative (obligation légale, contrainte client, transmission PA/PDP downstream).
+En **mode strict** (`LEMONFACTURX_STRICT_MODE=1`), la même situation retourne une erreur bloquante visible, et les violations de règles métier (BR-\*) deviennent bloquantes. **Limite assumée** : le hook intervenant après la création du PDF par Dolibarr, le PDF classique déjà généré reste sur le disque même en strict — utiliser « Vérifier Factur-X » avant envoi pour contrôler un fichier.
 
-Avant injection PDF, le module valide systématiquement le XML en interne :
+### Validation interne
 
-1. **Well-formed** : parse via `DOMDocument::loadXML()` pour détecter un XML cassé avant d'appeler la lib d'injection
-2. **Conformité XSD EN16931** : `DOMDocument::schemaValidate()` contre le XSD embarqué dans `vendor/atgp/factur-x/xsd/factur-x/en16931/`
+Avant injection PDF, le module valide systématiquement le XML :
 
-Si l'une de ces deux validations échoue, le comportement dépend du `LEMONFACTURX_STRICT_MODE` ci-dessus.
+1. **Well-formed** : `DOMDocument::loadXML()`
+2. **XSD EN16931** : `DOMDocument::schemaValidate()` contre le XSD embarqué
+3. **Règles métier** (`LEMONFACTURX_BR_CHECK`, défaut activé) : sous-ensemble des règles Schematron EN16931 vérifié en PHP — règles de calcul BR-CO-10..17, BR-27 (prix négatifs), BR-61 (IBAN), BR-16, BR-IC-02/11/12 (intracom), BR-AE-02, motifs d'exonération BR-\*-10, BR-CO-25/26, BR-09/11
+
+Le Schematron officiel complet (XSLT 2.0) n'est pas exécutable en PHP : pour une validation exhaustive, utiliser un validateur externe — voir [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+## API REST
+
+Avec le module API REST Dolibarr activé (clé API utilisateur, droits factures) :
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/index.php/lemonfacturx/invoice/{id}/xml` | XML Factur-X regénéré + warnings + violations BR |
+| `GET /api/index.php/lemonfacturx/invoice/{id}/status` | PDF présent ? XML embarqué ? violations BR du XML embarqué |
+
+## Export par lot
+
+```bash
+php scripts/export_facturx_batch.php /chemin/export [2026]
+```
+
+Extrait le XML Factur-X embarqué de toutes les factures validées (de l'année si précisée) vers `<ref>.xml`, avec rapport `OK / NO_PDF / NO_XML` — audit, archivage, ou dépôt manuel sur une plateforme.
 
 ## Dépendances embarquées
 
 Le dossier `vendor/` contient les libs nécessaires (pas de Composer requis sur le serveur) :
 
-- `atgp/factur-x` v3.0.0 — génération PDF Factur-X
-- `setasign/fpdi` — lecture/écriture PDF
-- `setasign/fpdf` — moteur PDF (utilisé par atgp, **pas** par Dolibarr)
-- `smalot/pdfparser` — parsing PDF
+- `atgp/factur-x` v3.3.0 — génération PDF Factur-X
+- `setasign/fpdi` v2.6.6 — lecture/écriture PDF
+- `setasign/fpdf` 1.8.6 — moteur PDF (utilisé par atgp, **pas** par Dolibarr)
+- `smalot/pdfparser` v2.12.5 — parsing PDF
 - `symfony/polyfill-mbstring` — compatibilité mbstring
 
 ## Conformité PDF/A-3
 
 La conformité PDF/A-3 est assurée par :
-- **Polices embarquées** : constante Dolibarr `MAIN_PDF_FORCE_FONT=pdfahelvetica` (à configurer via `/admin/const.php`)
+- **Polices embarquées** : constante Dolibarr `MAIN_PDF_FORCE_FONT=pdfahelvetica` — désormais **vérifiée** par le diagnostic et par un warning à la génération
+- **AFRelationship `Alternative`** : conforme à la spec Factur-X pour le profil EN16931 (corrigé en 3.0.0, `Data` auparavant)
 - **Annotations /F flag** : patch appliqué dans `vendor/setasign/fpdf/fpdf.php` (ajout `/F 4` aux liens)
 - **Profil ICC sRGB** + **métadonnées XMP** : gérés par la lib `atgp/factur-x`
+- **Post-validation veraPDF** optionnelle (`LEMONFACTURX_VERAPDF_PATH`) pour détecter les modèles PDF custom non conformes
 
 > **Note** : si un module tiers (ex: milestone/jalons) hardcode la police `'Helvetica'`, il faudra le patcher pour utiliser `pdf_getPDFFont($outputlangs)`.
 
-## Validation
+## Limitations et cas non traités
 
-Validation externe via [B2Brouter Factur-X Validator](https://www.b2brouter.net/fr/factur-x-validator/) :
-- Valid XMP, Valid XSD, Valid Schematron, Valid PDF/A-3
-- Profile EN 16931 (Comfort)
+Chaque cas non traité (multidevise, taxes locales, situations BTP, autofacturation, AE domestique, connecteur PDP, annuaire, Order-X...) est documenté avec son comportement et la raison du choix dans **[docs/LIMITATIONS.md](docs/LIMITATIONS.md)**.
 
-Validation XSD locale rapide (sur les 10 cas de test fournis dans `demo/` — standard, multi-TVA, TVA 0%, avoir, heures, jours, sans email, autoliquidation UE, acompte, facture finale avec acompte imputé) :
+## Validation et tests
 
-```bash
-xmllint --noout --schema vendor/atgp/factur-x/xsd/factur-x/en16931/Factur-X_1.08_EN16931.xsd chemin/vers/facturx.xml
-```
+Validation externe via [B2Brouter Factur-X Validator](https://www.b2brouter.net/fr/factur-x-validator/) ou le validateur FNFE-MPE.
 
-Un environnement Dolibarr de démo prêt à l'emploi est disponible via les scripts dans `demo/` (voir `demo/README.md`). Il permet de tester le module sans toucher à un Dolibarr de production.
+### Tests unitaires standalone (CI)
 
-### Suite de tests automatisée
-
-`tests/run-tests.php` couvre les 10 cas de fixtures (standard, multi-TVA, TVA 0%, avoir, heures, jours, sans email, autoliquidation UE, acompte, finale avec acompte imputé) avec assertions sur TypeCode, CategoryCode, unitCode, présence/absence des blocs optionnels, montants calculés et validation XSD.
+`tests/unit-tests.php` s'exécute **sans Dolibarr** (stubs embarqués) : 18 scénarios / 100+ assertions couvrant avoirs, remises BG-21, intracom K/AE, export, franchise, stress d'arrondis 50 lignes, acomptes, prélèvement SEPA, multidevise, formats. Chaque XML généré est validé **XSD + règles métier**.
 
 ```bash
-# Depuis la racine du module, sur un Dolibarr avec les fixtures chargées :
-php tests/run-tests.php
-# Exit code 0 = tous les tests passent, 1 = au moins un échec
+php tests/unit-tests.php
 ```
 
-À lancer après toute modification de `core/lib/lemonfacturx.lib.php` pour vérifier qu'aucune régression n'a été introduite.
+Exécutés automatiquement par la CI GitHub (`.github/workflows/ci.yml`) sur chaque push/PR, et avant chaque build de release.
+
+### Tests d'intégration
+
+`tests/run-tests.php` couvre les 10 cas de fixtures (`demo/fixtures.php`) contre un Dolibarr réel : TypeCode, CategoryCode, unitCode, blocs optionnels, montants, validation XSD.
+
+```bash
+php tests/run-tests.php   # exit 0 = OK, 1 = échec
+```
 
 ## Changelog
+
+### 3.0.0 (juin 2026)
+
+Refonte de conformité majeure — **lire les changements de comportement avant mise à jour**.
+
+**Corrections de conformité (bloquantes auparavant)** :
+- **Avoirs (381)** : montants désormais émis en **positif** (BR-27) avec `DuePayableAmount` exact (BR-CO-16 — l'écrêtage à zéro produisait des avoirs rejetés par les validateurs Schematron) + référence BG-3 à la facture d'origine.
+- **AFRelationship `Alternative`** au lieu de `Data` (exigé par la spec Factur-X pour le profil EN16931 ; `Data` était signalé en erreur par Mustang/FNFE).
+- **Remises fixes** : converties en remises document BG-21 (les lignes à prix négatif violaient BR-27).
+- **Intracom (K)** : pays de livraison ShipTo (BR-IC-12) et date de livraison (BR-IC-11) émis ; distinction **K (biens) / AE (services art. 196)** par `product_type`.
+- **BR-61** : bloc moyen de paiement omis si virement sans IBAN configuré (au lieu d'un XML rejeté).
+- **Ventilation TVA par (catégorie, taux)** + réconciliation des arrondis avec les totaux facture (BR-CO-14/17) ; totaux BG-22 recalculés de bas en haut (BR-CO-10..16).
+- **Multidevise** : détectée et refusée proprement (le XML divergeait silencieusement du PDF).
+
+**Changements de comportement** :
+- **BT-30/BT-47** : identifiant légal par défaut **SIRET sous schemeID 0009** (conforme ISO 6523, accepté Chorus Pro). L'ancien comportement (SIRET sous 0002) reste disponible : `LEMONFACTURX_LEGAL_ID_SCHEME=siret0002`.
+- **Libellés moyens de paiement corrigés** : 58 = **virement** SEPA (et non prélèvement) ; nouveau code 59 = prélèvement SEPA (avec ICS/RUM/IBAN débiteur BT-89/90/91). **Vérifier votre réglage si vous aviez choisi « 58 - Prélèvement SEPA »**.
+- **BT-72** : date de livraison réelle (`delivery_date`) ou bloc omis — la date d'émission n'est plus forgée en date de livraison (sauf repli intracom).
+- Quantités et prix unitaires émis avec jusqu'à 4 décimales.
+
+**Nouvelles données émises** : BT-8 (TVA débits/encaissements, config), BT-10 (`ref_client`), BT-13 (commande liée), BT-23 (cadre de facturation, config), BG-3 (factures antérieures : avoirs, rectificatives 384, acomptes imputés), BG-14 (période depuis les dates de service), BT-121 (codes VATEX), BT-89/90/91 (prélèvement).
+
+**Outillage** :
+- Validateur interne de **règles métier EN16931** (sous-ensemble Schematron en PHP) avant injection — bloquant en mode strict.
+- Boutons **« Vérifier Factur-X »** / **« Régénérer Factur-X »** sur la fiche facture.
+- **API REST** (`/lemonfacturx/invoice/{id}/xml` et `/status`) et **export par lot** (`scripts/export_facturx_batch.php`).
+- Post-validation **veraPDF** optionnelle ; diagnostic enrichi (`MAIN_PDF_FORCE_FONT`, `exec()`, binaire PHP CLI, note multidevise).
+- Suite de **tests unitaires standalone** (sans Dolibarr) + **CI GitHub** (lint + tests sur chaque push/PR, et avant chaque release).
+- Traduction **en_US** complète ; messages du hook et des contrôles internationalisés.
+
+**Robustesse et sécurité** :
+- Écriture **atomique** du PDF dans le subprocess (un disque plein ne peut plus tronquer le PDF) ; retours d'écriture vérifiés ; `catch \Throwable`.
+- Garde CLI sur `demo/*` et `tests/*` (les fixtures créaient un admin de démo accessibles en HTTP si le dépôt était cloné sous la racine web) + `.htaccess` de refus sur `demo/`, `tests/`, `scripts/`.
+- Actions GitHub épinglées par SHA ; cache des échecs du check de version (page admin ne rame plus si GitHub est injoignable) ; garde `curl_init` ; filtre `entity` sur les comptes bancaires (multicompany) et les contacts.
+- Prérequis matérialisés dans le descripteur (`phpmin` 8.1, `need_dolibarr_version` 16).
+- Fonctions globales préfixées (`xmlEncode`/`formatAmount` → `lemonfacturx_xml_encode`/`lemonfacturx_format_amount`).
+
+**Migration** : aucune migration DB, mais **désactiver puis réactiver le module** après mise à jour pour enregistrer le nouveau hook `invoicecard` (boutons de la fiche facture). Vérifier ensuite : (1) le réglage moyen de paiement si « 58 » était choisi pour du prélèvement → passer à 59 ; (2) si vos factures Chorus Pro passaient avec le SIRET sous 0002 et que votre plateforme est tatillonne, `LEMONFACTURX_LEGAL_ID_SCHEME` permet de revenir à l'ancien comportement ; (3) régénérer les avoirs récents non transmis pour bénéficier du correctif.
 
 ### 2.1.2 (juin 2026)
 
 Correctif Chorus Pro — identifiant légal **SIRET** (et non SIREN) dans `SpecifiedLegalOrganization` :
 
-- **`<ram:SpecifiedLegalOrganization>/ID` (BT-30 vendeur / BT-47 acheteur)** : émet désormais le **SIRET complet (14 chiffres)** au lieu du SIREN (9 chiffres), `schemeID="0002"` conservé. Chorus Pro identifie les structures par leur SIRET et rejetait un SIREN à 9 chiffres : « le nombre de caractères de l'identifiant … de type identifiant (SIRET) doit être égal à 14 » et « identifiant … n'est pas référencé dans notre système » (pour le fournisseur comme pour le débiteur). Le fichier restait valide EN16931 (un SIREN y est toléré), d'où le passage des validateurs Factur-X mais le rejet à la transmission Chorus Pro.
-- **Indépendant de l'adressage de routage** : l'endpoint BT-34/BT-49 (`URIUniversalCommunication`, `schemeID="0225"`, introduit en 2.1.0) continue de porter le SIREN — c'est un champ d'*adressage*, distinct de l'*identification légale*. Les deux coexistent dans le XML.
-- **Repli fiscal inchangé** : le `SpecifiedTaxRegistration schemeID="FC"` (franchise en base, BT-32) garde le SIREN.
-- **Diagnostic** : nouvelle alerte si le SIRET de la société émettrice (BT-30) ou du tiers acheteur (BT-47) ne fait pas 14 chiffres — évite un diagnostic « tout vert » trompeur alors que Chorus Pro rejettera la facture.
-
-Aucune migration nécessaire. Vérifier que le champ SIRET de **votre société** et des **tiers publics facturés** contient bien les 14 chiffres (Configuration → Société/Organisation, et fiche tiers).
+- **`<ram:SpecifiedLegalOrganization>/ID` (BT-30 vendeur / BT-47 acheteur)** : émet désormais le **SIRET complet (14 chiffres)** au lieu du SIREN (9 chiffres), `schemeID="0002"` conservé. Chorus Pro identifie les structures par leur SIRET et rejetait un SIREN à 9 chiffres. Le fichier restait valide EN16931, d'où le passage des validateurs Factur-X mais le rejet à la transmission Chorus Pro.
+- **Indépendant de l'adressage de routage** : l'endpoint BT-34/BT-49 (`schemeID="0225"`, introduit en 2.1.0) continue de porter le SIREN.
+- **Diagnostic** : alerte si le SIRET émetteur (BT-30) ou acheteur (BT-47) ne fait pas 14 chiffres.
 
 ### 2.1.1 (mai 2026)
 
-Correctif du diagnostic de configuration pour les auto-entrepreneurs :
-
-- **Franchise en base TVA** : le diagnostic ne signale plus la TVA intracommunautaire manquante comme une erreur pour une société non assujettie (293 B CGI). Il affiche désormais une ligne valide « non requis (franchise en base) ». Le diagnostic était le seul endroit à ne pas connaître la franchise ; le générateur publiait déjà correctement le SIREN comme identifiant fiscal (`SpecifiedTaxRegistration schemeID="FC"`), donc les factures produites étaient déjà valides — seul l'affichage de la page de config était trompeur.
-
-Aucune migration nécessaire.
+- **Franchise en base TVA** : le diagnostic ne signale plus la TVA intracommunautaire manquante comme une erreur pour une société non assujettie (293 B CGI).
 
 ### 2.1.0 (mai 2026)
 
-Adressage de routage par SIREN pour le réseau des Plateformes Agréées (PA/PDP) :
-
-- **Endpoint BT-34 / BT-49 (`URIUniversalCommunication/URIID`)** : l'adresse électronique du vendeur et de l'acheteur porte désormais le **SIREN avec `schemeID="0225"`** (annuaire PPF, XP Z12-012) au lieu de l'email (`schemeID="EM"`). C'est ce qu'attend le routage du réseau des Plateformes Agréées : un email n'est pas routable et déclenchait un rejet au pre-check des PDP (`receiver address does not exist in peppol directory`).
-- **Schéma configurable** : nouveau réglage `LEMONFACTURX_ENDPOINT_SCHEME` (défaut `0225`), pour les PA attendant un autre code ISO 6523 (`0002` SIREN / `0009` SIRET).
-- **Repli email** : pour un tiers sans SIREN (étranger, hors périmètre de la réforme), l'email (`schemeID="EM"`) reste utilisé — aucun bloc vide émis.
-- **Diagnostic** : BT-34/BT-49 sont considérés satisfaits par le SIREN *ou* l'email ; un acheteur français sans SIREN/SIRET est signalé (non routable sur le réseau PA, même avec un email).
-
-Le `<ram:SpecifiedLegalOrganization>` (identifiant légal BT-30/BT-47) reste en `schemeID="0002"` : c'est un champ d'*identification* distinct de l'*adressage*, inchangé. Aucune migration nécessaire ; vérifier que le SIRET/SIREN des tiers acheteurs est bien renseigné dans Dolibarr.
+- **Endpoint BT-34 / BT-49** : SIREN avec `schemeID="0225"` (annuaire PPF) au lieu de l'email — requis par le routage du réseau des Plateformes Agréées. Schéma configurable (`LEMONFACTURX_ENDPOINT_SCHEME`), repli email pour les tiers sans SIREN.
 
 ### 2.0.2 (mai 2026)
 
-Deux correctifs de robustesse Windows + auto-entreprise (franchise en base TVA) :
-
-- **Compatibilité Windows** ([#4](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/4), reprend la [PR #5](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/pull/5) de [@Charlymd](https://github.com/Charlymd)) :
-  - Le fichier XML temporaire est désormais écrit dans `DOL_DATA_ROOT/facturx/temp/` (toujours dans l'`open_basedir` Dolibarr) au lieu de `sys_get_temp_dir()` qui pouvait pointer hors `open_basedir` sur Windows (`C:\WINDOWS\TEMP`).
-  - Regex de validation `LEMONFACTURX_PHP_CLI_PATH` étendue pour accepter les chemins Windows (`:`, `\`, `(`, `)` ajoutés). `escapeshellarg()` continue de bloquer toute injection.
-- **Franchise en base TVA — auto-entrepreneurs** ([#6](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/6)) :
-  - `CategoryCode` passe de `O` (Services hors champ) à `E` (Exempt from tax) pour les sociétés émettrices non assujetties (293 B CGI). Le code `O` déclenchait BR-O-04/05 sur le taux 0 et était sémantiquement faux (293 B = exonération française, pas hors champ EU).
-  - Pour satisfaire BR-CO-26 / BR-E-09 (identifiant fiscal vendeur), en l'absence de TVA intra le SIREN est désormais publié comme `SpecifiedTaxRegistration schemeID="FC"` (Tax registration identifier France). Plus besoin de saisir un numéro intracom bidon.
-  - Le diagnostic de configuration ne signale plus la TVA intracommunautaire manquante quand la société est en franchise.
-  - `<RateApplicablePercent>` est omis pour `CategoryCode='O'` (belt-and-braces BR-O-04/05).
-
-Aucune migration nécessaire.
+- **Compatibilité Windows** ([#4](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/4), [PR #5](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/pull/5) de [@Charlymd](https://github.com/Charlymd)) : XML temporaire dans `DOL_DATA_ROOT/facturx/temp/`, regex `LEMONFACTURX_PHP_CLI_PATH` étendue.
+- **Franchise en base TVA** ([#6](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/6)) : catégorie `E` (au lieu de `O`), SIREN publié en `SpecifiedTaxRegistration schemeID="FC"` (BR-CO-26/BR-E-09).
 
 ### 2.0.1 (mai 2026)
 
-Correctifs UX du diagnostic de configuration :
-
-- Le bouton **Corriger** du diagnostic est désormais ciblé selon le type d'erreur :
-  - Compte bancaire / IBAN / BIC → page **Banques/Caisses**
-  - Raison sociale, adresse, TVA, SIRET, email → page **Société/Organisation**
-  - Module désactivé → page **Modules**
-- Ajout d'un check des modules Dolibarr requis (**Banque/Caisse** et **Factures**) en tête du diagnostic, pour orienter clairement les nouveaux installateurs sur les prérequis.
-
-Aucune migration nécessaire.
+- Boutons **Corriger** du diagnostic ciblés par type d'erreur ; check des modules Dolibarr requis.
 
 ### 1.1.1 (avril 2026)
 
-Maintenance des dépendances vendored, suite aux [PRs `.gitattributes`](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/3) fusionnées upstream par William Desportes :
-
-| Lib | Avant | Après |
-|---|---|---|
-| `atgp/factur-x` | v3.0.0 | **v3.3.0** |
-| `smalot/pdfparser` | v2.12.3 | **v2.12.5** |
-| `setasign/fpdf` | 1.8.2 | **1.8.6** (patch `/F 4` pour PDF/A-3 réappliqué) |
-| `setasign/fpdi` | v2.6.4 | **v2.6.6** |
-| `symfony/polyfill-mbstring` | v1.33.0 | **v1.36.0** |
-
-Dossier `vendor/` plus léger et sans fichiers de dev (grâce aux `.gitattributes` upstream). 80/80 tests automatisés passent toujours, aucune régression.
+Maintenance des dépendances vendored : `atgp/factur-x` v3.3.0, `smalot/pdfparser` v2.12.5, `setasign/fpdf` 1.8.6 (patch `/F 4` réappliqué), `setasign/fpdi` v2.6.6, `symfony/polyfill-mbstring` v1.36.0.
 
 ### 1.1.0 (avril 2026)
 
-Module **distribué publiquement sur GitHub**. Mise à niveau pour couvrir tous les cas EN16931 et fiabiliser le comportement en production partagée.
-
-- **Conformité EN16931 renforcée** :
-  - Support des factures d'acompte (`Facture::TYPE_DEPOSIT` → TypeCode `386`)
-  - Support de `TotalPrepaidAmount` sur les factures finales ayant imputé un acompte (via `getSumDepositsUsed()`)
-  - CategoryCode TVA intelligent selon le contexte : `S` / `K` (autoliquidation UE) / `G` (export hors UE) / `O` (hors champ) / `E` (exonéré), au lieu du binaire S/E précédent
-  - Mapping des unités de ligne Dolibarr vers les codes UN/ECE Rec 20 (HUR, DAY, KGM, MTR...) au lieu de C62 en dur
-  - `URIUniversalCommunication` rendu conditionnel : plus de bloc vide si l'email est absent
-  - `ExemptionReason` généré dynamiquement selon le motif réel
-- **Qualité module distribué** :
-  - Validation XML interne avant injection PDF (well-formed + XSD EN16931 local)
-  - Nouveau mode `LEMONFACTURX_STRICT_MODE` (0 = best-effort, 1 = bloquant)
-  - Message unique consolidé à l'utilisateur : vert si injection OK, orange avec liste des warnings sinon
-  - CSRF de la page admin aligné sur le pattern Dolibarr 22 (`currentToken()`)
-  - Exposition dans l'UI admin des mentions légales PMD/PMT/AAB et du chemin PHP CLI
-- **Outillage** :
-  - `demo/` : environnement Dolibarr de démo (fixtures pour tests Factur-X + fixtures marketing 6 mois)
-  - `tests/run-tests.php` : suite de tests automatisés couvrant 10 cas × 8 assertions (80/80 PASS)
-  - `docs/spec-acomptes.md` : spécification détaillée du support des acomptes
-
-Aucune migration DB nécessaire. Les anciennes constantes restent compatibles. Les nouvelles constantes (`STRICT_MODE`, `PHP_CLI_PATH`, `NOTE_PMD/PMT/AAB`) ont des valeurs par défaut raisonnables.
+Module distribué publiquement sur GitHub : acomptes (386, `TotalPrepaidAmount`), CategoryCode contextuel, mapping unités UN/ECE, validation XSD interne, mode strict, demo/ + tests/.
 
 ### 1.0.0
 

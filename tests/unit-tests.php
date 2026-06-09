@@ -159,8 +159,9 @@ $xp = lfx_xpath($xml);
 lfx_assert_eq('381', lfx_xp_str($xp, '//rsm:ExchangedDocument/ram:TypeCode'), 'TypeCode 381');
 lfx_assert_eq('1200.00', lfx_xp_str($xp, '//ram:GrandTotalAmount'), 'GrandTotal positif');
 lfx_assert_eq('1200.00', lfx_xp_str($xp, '//ram:DuePayableAmount'), 'DuePayable positif (BR-CO-16, pas de max(0))');
-lfx_assert_eq('1000.0000', null !== lfx_xp_str($xp, '//ram:NetPriceProductTradePrice/ram:ChargeAmount') ? '1000.0000' : null, 'présence prix'); // présence
-lfx_assert((float) lfx_xp_str($xp, '//ram:NetPriceProductTradePrice/ram:ChargeAmount') >= 0, 'prix unitaire positif (BR-27)');
+$creditPrice = lfx_xp_str($xp, '//ram:NetPriceProductTradePrice/ram:ChargeAmount');
+lfx_assert($creditPrice !== null, 'prix unitaire présent');
+lfx_assert((float) $creditPrice >= 0, 'prix unitaire positif (BR-27)');
 lfx_assert_eq('FA2605-0099', lfx_xp_str($xp, '//ram:InvoiceReferencedDocument/ram:IssuerAssignedID'), 'BG-3 facture d\'origine');
 lfx_assert_eq('20260512', lfx_xp_str($xp, '//ram:InvoiceReferencedDocument/ram:FormattedIssueDateTime/qdt:DateTimeString'), 'BG-3 date d\'origine');
 echo "U02 OK\n";

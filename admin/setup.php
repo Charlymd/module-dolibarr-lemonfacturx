@@ -376,7 +376,7 @@ if (strpos($phpCliPath, '/') !== false || strpos($phpCliPath, '\\') !== false) {
 	if (is_executable($phpCliPath)) {
 		$diagOk[] = $langs->trans("LemonFacturXDiagPhpCliOk").' : '.dol_escape_htmltag($phpCliPath);
 	} else {
-		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", $phpCliPath), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
+		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", dol_escape_htmltag($phpCliPath)), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
 	}
 }
 
