@@ -282,6 +282,17 @@ Chaque cas non traité (multidevise, taxes locales, situations BTP, autofacturat
 
 Validation externe via [B2Brouter Factur-X Validator](https://www.b2brouter.net/fr/factur-x-validator/) ou le validateur FNFE-MPE.
 
+### Validateurs en ligne : faux positifs connus
+
+Tous les validateurs en ligne n'embarquent pas la même version des schémas et listes de codes. Un fichier **conforme aux artefacts officiels actuels** peut être rejeté par un validateur resté sur des artefacts ~2021. Deux rejets à tort identifiés (juin 2026, fichier contre-validé par xmllint/XSD 1.08 + veraPDF 146/146 + second validateur) :
+
+| Rejet affiché | Cause côté validateur | Réalité |
+|---|---|---|
+| XSD : « `InvoiceReferencedDocument`… not expected. Expected is (`ReceivableSpecifiedTradeAccountingAccount`) » | XSD de l'ère ZUGFeRD 2.1.1 : `InvoiceReferencedDocument` sans `maxOccurs` → 1 seul autorisé. Le 2e (facture finale avec plusieurs acomptes/avoirs imputés) le fait échouer | BG-3 est **0..n** dans EN16931 ; le XSD Factur-X 1.08 (embarqué ici) le déclare `maxOccurs="unbounded"` |
+| « [BR-CL-25] L'identifiant du schéma… DOIT appartenir à la liste de codes CEF EAS » sur l'endpoint `0225` | Liste EAS des [artefacts de validation](https://github.com/ConnectingEurope/eInvoicing-EN16931) ≤ 1.3.9 (oct. 2021), qui s'arrête à `0220` | `0225` (adresse électronique SIREN, annuaire de la réforme FR) figure dans la liste EAS actuelle |
+
+En cas de doute, faire foi : validation XSD contre les schémas Factur-X 1.08 embarqués (`xmllint --schema`), artefacts Schematron **à jour** de la Commission européenne, et veraPDF pour le PDF/A-3. Ne pas dégrader le XML (retirer le BG-3 multiple, changer `0225`) pour satisfaire un validateur périmé.
+
 ### Tests unitaires standalone (CI)
 
 `tests/unit-tests.php` s'exécute **sans Dolibarr** (stubs embarqués) : 18 scénarios / 100+ assertions couvrant avoirs, remises BG-21, intracom K/AE, export, franchise, stress d'arrondis 50 lignes, acomptes, prélèvement SEPA, multidevise, formats. Chaque XML généré est validé **XSD + règles métier**.

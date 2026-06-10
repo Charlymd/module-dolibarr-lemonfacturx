@@ -121,7 +121,10 @@ place un validateur PHP couvrant les règles de calcul et de cohérence les plus
 contrôlées (BR-CO-10..17, BR-27, BR-61, BR-16, BR-IC-02/11/12, BR-AE-02,
 BR-*-08/10, BR-CO-25/26, BR-09/11). Pour une validation exhaustive ponctuelle,
 utiliser un validateur externe (B2Brouter, FNFE, Mustang) — le XML s'exporte
-via l'API ou `scripts/export_facturx_batch.php`.
+via l'API ou `scripts/export_facturx_batch.php`. Attention aux validateurs en
+ligne basés sur des artefacts périmés (~2021) : faux positifs connus sur le
+BG-3 multiple et l'endpoint `0225` — voir « Validateurs en ligne : faux
+positifs connus » dans le README.
 
 ### PDF/A-3 garanti
 **Partiel.** Le module force ce qu'il contrôle (XMP, AFRelationship
