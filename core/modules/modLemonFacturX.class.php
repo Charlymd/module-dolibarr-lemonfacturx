@@ -66,7 +66,6 @@ class modLemonFacturX extends DolibarrModules
 			array('LEMONFACTURX_PAYMENT_MEANS', 'chaine', '30', 'Code moyen de paiement UNTDID 4461 (30=virement, 58=virement SEPA, 59=prélèvement SEPA, 49=prélèvement)', 1, 'current', 0),
 			array('LEMONFACTURX_STRICT_MODE', 'int', '0', 'Mode erreur : 0 = best-effort, 1 = strict bloquant', 1, 'current', 0),
 			array('LEMONFACTURX_BR_CHECK', 'int', '1', 'Contrôle interne des règles métier EN16931 (BR-*) avant injection', 1, 'current', 0),
-			array('LEMONFACTURX_LEGAL_ID_SCHEME', 'chaine', 'siret0009', 'Identifiant légal BT-30/BT-47 : siret0009 (défaut), siren0002, siret0002 (héritage 2.1.x)', 1, 'current', 0),
 			array('LEMONFACTURX_VAT_DUE_DATE_TYPE', 'chaine', '', 'BT-8 exigibilité TVA : vide (omis), 5 = débits, 72 = encaissements', 1, 'current', 0),
 			array('LEMONFACTURX_BT23_PROCESS', 'chaine', '', 'BT-23 cadre de facturation (A1 Chorus Pro B2G, B1/S1/S2 réforme FR...), omis si vide', 1, 'current', 0),
 			array('LEMONFACTURX_PHP_CLI_PATH', 'chaine', 'php', 'Chemin du binaire PHP CLI pour subprocess injection', 1, 'current', 0),

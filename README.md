@@ -33,7 +33,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 4. Configurer via **Accueil > Configuration > Modules > LemonFacturX** :
    - Compte bancaire (IBAN/BIC)
    - Moyen de paiement par défaut (virement, virement SEPA, prélèvement SEPA, prélèvement)
-   - Identifiant légal BT-30/BT-47 (SIRET 0009 par défaut)
+   - Identifiant légal BT-30/BT-47 (SIRET sous schemeID 0009)
    - Exigibilité TVA (BT-8 : débits / encaissements), cadre de facturation (BT-23)
    - Mode de gestion d'erreur (best-effort / strict), contrôle des règles métier
    - Éventuellement chemin PHP CLI, chemin veraPDF et mentions légales
@@ -127,7 +127,7 @@ Modèle de menace, protections détaillées et processus de signalement : voir [
 | BT-23 Business process | `LEMONFACTURX_BT23_PROCESS` (A1, B1, S1..., omis si vide) |
 | BT-25/BG-3 Preceding invoice | `fk_facture_source` (avoir/rectificative) + acomptes imputés |
 | Seller / Buyer | `$mysoc` / `$invoice->thirdparty` |
-| BT-30/BT-47 Legal ID | `idprof2`, schéma configurable (SIRET 0009 par défaut) |
+| BT-30/BT-47 Legal ID | `idprof2` → SIRET sous schemeID 0009 (ISO 6523, accepté Chorus Pro) |
 | BT-31/BT-32 Tax registration | `tva_intra`, ou SIREN `schemeID="FC"` (franchise en base) |
 | BT-34/BT-49 Endpoint | SIREN `schemeID="0225"` (annuaire PPF), repli email `EM` |
 | BT-72 Delivery date | `$invoice->delivery_date` si renseignée (forcée pour l'intracom K) |
@@ -208,14 +208,13 @@ Toutes sont configurables via l'écran d'administration du module (**Accueil > C
 | `LEMONFACTURX_BANK_ACCOUNT` | int | 0 | ID du compte bancaire Dolibarr |
 | `LEMONFACTURX_PAYMENT_MEANS` | string | 30 | Code UNTDID 4461 : 30 virement, 58 virement SEPA, 59 prélèvement SEPA, 49 prélèvement |
 | `LEMONFACTURX_ENDPOINT_SCHEME` | string | 0225 | Schéma de l'endpoint BT-34/BT-49 (0225 SIREN annuaire, 0002, 0009) |
-| `LEMONFACTURX_LEGAL_ID_SCHEME` | string | siret0009 | Identifiant légal BT-30/BT-47 : `siret0009` (ISO 6523, Chorus OK), `siren0002`, `siret0002` (héritage 2.1.x) |
 | `LEMONFACTURX_VAT_DUE_DATE_TYPE` | string | *(vide)* | BT-8 : `5` débits, `72` encaissements, vide = omis |
 | `LEMONFACTURX_BT23_PROCESS` | string | *(vide)* | BT-23 cadre de facturation (A1 Chorus B2G, B1/S1/S2 réforme), vide = omis |
 | `LEMONFACTURX_STRICT_MODE` | int | 0 | 0 = best-effort (défaut), 1 = strict (voir ci-dessous) |
 | `LEMONFACTURX_BR_CHECK` | int | 1 | Contrôle interne des règles métier EN16931 avant injection |
 | `LEMONFACTURX_PHP_CLI_PATH` | string | php | Chemin vers le binaire PHP CLI (voir note ci-dessous) |
 | `LEMONFACTURX_VERAPDF_PATH` | string | *(vide)* | Chemin veraPDF : post-validation PDF/A-3b de chaque PDF généré (non bloquant) |
-| `LEMONFACTURX_NOTE_PMD/PMT/AAB` | text | mentions FR | Mentions légales BR-FR-05 |
+| `LEMONFACTURX_NOTE_PMD/PMT/AAB` | text | mentions FR | Mentions légales BR-FR-05 (le texte par défaut s'applique si le champ est laissé vide) |
 
 > **Note PHP CLI** : Le subprocess d'injection utilise `php` par défaut. Sur les serveurs avec plusieurs versions de PHP, ou si `php` n'est pas dans le PATH, configurer `LEMONFACTURX_PHP_CLI_PATH` avec le chemin complet (ex: `/usr/bin/php8.2`). Ne **pas** utiliser `PHP_BINARY` : en contexte php-fpm, cette constante pointe vers le binaire fpm et non le CLI.
 
@@ -318,7 +317,8 @@ Refonte de conformité majeure — **lire les changements de comportement avant 
 - **SIREN/SIRET réservés aux tiers français** : l'identifiant local d'un tiers étranger (HRB allemand...) n'est plus publié sous un scheme SIREN/SIRET — repli email pour l'endpoint.
 
 **Changements de comportement** :
-- **BT-30/BT-47** : identifiant légal par défaut **SIRET sous schemeID 0009** (conforme ISO 6523, accepté Chorus Pro). L'ancien comportement (SIRET sous 0002) reste disponible : `LEMONFACTURX_LEGAL_ID_SCHEME=siret0002`.
+- **BT-30/BT-47** : identifiant légal **toujours SIRET sous schemeID 0009** (seul couple à la fois conforme ISO 6523 et accepté par Chorus Pro). Le réglage `LEMONFACTURX_LEGAL_ID_SCHEME` a été **retiré** : les anciens couples SIREN/0002 (rejeté par Chorus Pro) et SIRET/0002 (héritage 2.1.x, identifiant malformé) ne produisaient que des PDF refusés ou non conformes.
+- **Mentions légales BR-FR-05 (PMD/PMT/AAB)** : le texte par défaut s'applique désormais réellement quand le champ est laissé vide (auparavant les constantes créées vides à l'activation produisaient des mentions vides dans le XML).
 - **Libellés moyens de paiement corrigés** : 58 = **virement** SEPA (et non prélèvement) ; nouveau code 59 = prélèvement SEPA (avec ICS/RUM/IBAN débiteur BT-89/90/91). **Vérifier votre réglage si vous aviez choisi « 58 - Prélèvement SEPA »**.
 - **BT-72** : date de livraison réelle (`delivery_date`) ou bloc omis — la date d'émission n'est plus forgée en date de livraison (sauf repli intracom).
 - Quantités et prix unitaires émis avec jusqu'à 4 décimales.
@@ -340,7 +340,7 @@ Refonte de conformité majeure — **lire les changements de comportement avant 
 - Prérequis matérialisés dans le descripteur (`phpmin` 8.1, `need_dolibarr_version` 16).
 - Fonctions globales préfixées (`xmlEncode`/`formatAmount` → `lemonfacturx_xml_encode`/`lemonfacturx_format_amount`).
 
-**Migration** : aucune migration DB, mais **désactiver puis réactiver le module** après mise à jour pour enregistrer le nouveau hook `invoicecard` (boutons de la fiche facture). Vérifier ensuite : (1) le réglage moyen de paiement si « 58 » était choisi pour du prélèvement → passer à 59 ; (2) si vos factures Chorus Pro passaient avec le SIRET sous 0002 et que votre plateforme est tatillonne, `LEMONFACTURX_LEGAL_ID_SCHEME` permet de revenir à l'ancien comportement ; (3) régénérer les avoirs récents non transmis pour bénéficier du correctif.
+**Migration** : aucune migration DB, mais **désactiver puis réactiver le module** après mise à jour pour enregistrer le nouveau hook `invoicecard` (boutons de la fiche facture). Vérifier ensuite : (1) le réglage moyen de paiement si « 58 » était choisi pour du prélèvement → passer à 59 ; (2) régénérer les avoirs récents non transmis pour bénéficier du correctif. L'identifiant légal BT-30/BT-47 est désormais toujours SIRET/0009 (plus de réglage).
 
 ### 2.1.2 (juin 2026)
 

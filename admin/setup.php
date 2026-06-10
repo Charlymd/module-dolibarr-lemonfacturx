@@ -51,7 +51,6 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		['LEMONFACTURX_BANK_ACCOUNT', GETPOSTINT('LEMONFACTURX_BANK_ACCOUNT'),    'int'],
 		['LEMONFACTURX_PAYMENT_MEANS',trim(GETPOST('LEMONFACTURX_PAYMENT_MEANS', 'alpha')), 'chaine'],
 		['LEMONFACTURX_ENDPOINT_SCHEME',trim(GETPOST('LEMONFACTURX_ENDPOINT_SCHEME', 'alpha')), 'chaine'],
-		['LEMONFACTURX_LEGAL_ID_SCHEME',trim(GETPOST('LEMONFACTURX_LEGAL_ID_SCHEME', 'alpha')), 'chaine'],
 		['LEMONFACTURX_VAT_DUE_DATE_TYPE',trim(GETPOST('LEMONFACTURX_VAT_DUE_DATE_TYPE', 'alpha')), 'chaine'],
 		['LEMONFACTURX_BT23_PROCESS', trim(GETPOST('LEMONFACTURX_BT23_PROCESS', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_STRICT_MODE',  GETPOSTINT('LEMONFACTURX_STRICT_MODE'),     'int'],
@@ -150,19 +149,12 @@ print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPaymen
 print '</td>';
 print '</tr>';
 
-// Identifiant légal BT-30 / BT-47
+// Identifiant légal BT-30 / BT-47 : toujours SIRET sous schéma ISO 6523 0009
+// (seul couple conforme et accepté par Chorus Pro). Plus de réglage : les anciens
+// couples SIREN/0002 et SIRET/0002 produisaient des identifiants refusés ou malformés.
 print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXLegalIdScheme");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXLegalIdSchemeHint").'</span>';
-print '</td>';
-print '<td>';
-$legalScheme = getDolGlobalString('LEMONFACTURX_LEGAL_ID_SCHEME', 'siret0009');
-print '<select name="LEMONFACTURX_LEGAL_ID_SCHEME" class="flat">';
-print '<option value="siret0009"'.($legalScheme == 'siret0009' ? ' selected' : '').'>'.$langs->trans("LegalIdSchemeSiret0009").'</option>';
-print '<option value="siren0002"'.($legalScheme == 'siren0002' ? ' selected' : '').'>'.$langs->trans("LegalIdSchemeSiren0002").'</option>';
-print '<option value="siret0002"'.($legalScheme == 'siret0002' ? ' selected' : '').'>'.$langs->trans("LegalIdSchemeSiret0002").'</option>';
-print '</select>';
-print '</td>';
+print '<td>'.$langs->trans("LemonFacturXLegalIdScheme").'</td>';
+print '<td><span class="opacitymedium">'.$langs->trans("LegalIdSchemeSiret0009").'</span></td>';
 print '</tr>';
 
 // BT-8 : exigibilité de la TVA (débits / encaissements)
@@ -261,7 +253,9 @@ foreach ([
 	['LEMONFACTURX_NOTE_PMT', 'LemonFacturXNotePMT', LEMONFACTURX_DEFAULT_NOTE_PMT],
 	['LEMONFACTURX_NOTE_AAB', 'LemonFacturXNoteAAB', LEMONFACTURX_DEFAULT_NOTE_AAB],
 ] as $note) {
-	$val = getDolGlobalString($note[0], $note[2]);
+	// Affiche le texte par défaut quand la constante est vide (les constantes sont
+	// créées vides à l'activation : sans ce garde-fou le champ et le XML restaient vides).
+	$val = lemonfacturx_conf_or_default($note[0], $note[2]);
 	print '<tr class="oddeven">';
 	print '<td>'.$langs->trans($note[1]).'</td>';
 	print '<td><textarea name="'.$note[0].'" class="flat minwidth500" rows="3">'.dol_escape_htmltag($val).'</textarea></td>';

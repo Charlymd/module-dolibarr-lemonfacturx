@@ -495,15 +495,27 @@ function lemonfacturx_get_direct_debit_info($db, $buyer, &$buildWarnings)
 }
 
 /**
+ * Retourne la valeur d'une constante Dolibarr, ou le défaut fourni si elle est
+ * absente OU vide. getDolGlobalString() ne retombe sur le défaut que lorsque la
+ * clé n'existe pas ; or nos constantes de configuration sont créées vides à
+ * l'activation du module, donc le défaut ne s'appliquait jamais sans ce garde-fou.
+ */
+function lemonfacturx_conf_or_default($key, $default)
+{
+	$val = trim(getDolGlobalString($key, ''));
+	return $val !== '' ? $val : $default;
+}
+
+/**
  * Génère les 3 IncludedNote BR-FR-05 (PMD, PMT, AAB) avec les valeurs
- * surchargeables via constantes Dolibarr.
+ * surchargeables via constantes Dolibarr (défaut appliqué si la constante est vide).
  */
 function lemonfacturx_build_legal_notes_xml()
 {
 	$notes = [
-		'PMD' => getDolGlobalString('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
-		'PMT' => getDolGlobalString('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
-		'AAB' => getDolGlobalString('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
+		'PMD' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
+		'PMT' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
+		'AAB' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
 	];
 	$xml = '';
 	foreach ($notes as $code => $content) {
@@ -800,30 +812,16 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email)
 	$siren   = $isFR ? lemonfacturx_extract_siren($party->idprof2 ?? '') : '';
 	$siret   = $isFR ? preg_replace('/[^0-9]/', '', $party->idprof2 ?? '') : '';
 
-	// BT-30 (vendeur) / BT-47 (acheteur) : identifiant légal, configurable.
+	// BT-30 (vendeur) / BT-47 (acheteur) : identifiant légal.
 	// ISO 6523 : 0002 = SIREN (9 chiffres), 0009 = SIRET (14 chiffres).
-	// - siret0009 (défaut) : SIRET complet sous 0009 — conforme ISO 6523 et
-	//   accepté par Chorus Pro (qui exige 14 chiffres).
-	// - siren0002 : SIREN sous 0002 — conforme ISO 6523, rejeté par Chorus Pro.
-	// - siret0002 : SIRET sous 0002 — héritage versions 2.1.x (workaround Chorus),
-	//   formellement incohérent ISO 6523, conservé pour compatibilité.
+	// On émet TOUJOURS le SIRET sous le schéma 0009 : c'est le seul couple à la
+	// fois conforme ISO 6523 et accepté par Chorus Pro, et tout vendeur/acheteur
+	// français possède un SIRET (un établissement). Les anciens couples SIREN/0002
+	// (rejeté par Chorus Pro) et SIRET/0002 (héritage 2.1.x, identifiant malformé)
+	// ont été retirés : ils ne produisaient que des PDF refusés ou non conformes.
 	// Distinct de l'endpoint de routage BT-34/BT-49 ci-dessous (SIREN 0225).
-	$legalScheme = getDolGlobalString('LEMONFACTURX_LEGAL_ID_SCHEME', 'siret0009');
-	switch ($legalScheme) {
-		case 'siren0002':
-			$legalId = $siren;
-			$legalSchemeId = '0002';
-			break;
-		case 'siret0002':
-			$legalId = $siret;
-			$legalSchemeId = '0002';
-			break;
-		case 'siret0009':
-		default:
-			$legalId = $siret;
-			$legalSchemeId = '0009';
-			break;
-	}
+	$legalId = $siret;
+	$legalSchemeId = '0009';
 
 	$xml  = '    <ram:'.$tag.'>'."\n";
 	$xml .= '      <ram:Name>'.lemonfacturx_xml_encode($party->name ?? '').'</ram:Name>'."\n";
