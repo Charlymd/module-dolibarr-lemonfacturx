@@ -769,7 +769,9 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 	$buyerEmail = lemonfacturx_get_buyer_email($buyer, $invoice->db);
 	if ($buyerSiren === '' && $buyerEmail === '') {
 		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerEndpoint');
-	} elseif ($buyerSiren === '' && $buyerIsFR) {
+	} elseif ($buyerSiren === '' && $buyerIsFR && ($buyer->typent_code ?? '') !== 'TE_PRIVATE') {
+		// Particulier (TE_PRIVATE) : pas de SIREN, hors champ e-invoicing
+		// (le B2C relève du e-reporting) → pas d'avertissement de routage
 		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerSIRENRouting');
 	}
 
