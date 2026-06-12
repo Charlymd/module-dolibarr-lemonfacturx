@@ -74,6 +74,40 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	}
 }
 
+// Recopie des 3 mentions BR-FR-05 dans le pied de facture Dolibarr
+// (FACTURE_FREE_TEXT, « Mention complémentaire sur les factures ») pour que
+// le PDF lisible affiche la même chose que le XML embarqué. Dolibarr n'a
+// aucun champ natif structuré pour ces mentions, uniquement ce texte libre.
+// On n'écrase jamais l'existant : seules les mentions absentes sont ajoutées.
+if ($action == 'copynotestofreetext') {
+	if (GETPOST('token', 'alpha') !== currentToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	$freeText = getDolGlobalString('FACTURE_FREE_TEXT', '');
+	$added = 0;
+	foreach (array(
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
+	) as $mention) {
+		$mention = trim($mention);
+		if ($mention === '' || strpos($freeText, $mention) !== false) {
+			continue;
+		}
+		$freeText = ($freeText !== '' ? rtrim($freeText)."\n" : '').$mention;
+		$added++;
+	}
+	if ($added > 0) {
+		if (dolibarr_set_const($db, 'FACTURE_FREE_TEXT', $freeText, 'chaine', 0, '', $conf->entity) > 0) {
+			setEventMessages($langs->trans('LemonFacturXCopyNotesDone', $added), null, 'mesgs');
+		} else {
+			setEventMessages($langs->trans('Error'), null, 'errors');
+		}
+	} else {
+		setEventMessages($langs->trans('LemonFacturXCopyNotesAlready'), null, 'mesgs');
+	}
+}
+
 // Correction en un clic : pose MAIN_PDF_FORCE_FONT = pdfahelvetica (PDF/A-3).
 // Réglage global Dolibarr (toutes les éditions PDF), pas seulement le module.
 if ($action == 'setforcefont') {
@@ -275,6 +309,16 @@ foreach ([
 	print '</tr>';
 }
 
+// Passerelle vers le PDF visible : ces mentions ne vivent que dans le XML
+// embarqué ; pour les imprimer en clair, Dolibarr n'a que le texte libre
+// FACTURE_FREE_TEXT (pied de facture). Bouton de recopie en un clic.
+print '<tr class="oddeven">';
+print '<td colspan="2">';
+print '<a class="butActionSmall" href="'.dol_escape_htmltag($_SERVER["PHP_SELF"].'?action=copynotestofreetext&token='.newToken()).'">'.$langs->trans('LemonFacturXCopyNotesToFreeText').'</a>';
+print '<br><span class="opacitymedium">'.$langs->trans('LemonFacturXCopyNotesToFreeTextHelp').'</span>';
+print '</td>';
+print '</tr>';
+
 print '</table>';
 
 print '<br>';
@@ -372,6 +416,19 @@ if ($forceFont === '') {
 	];
 } else {
 	$diagOk[] = $langs->trans("LemonFacturXDiagForceFontOk").' : '.dol_escape_htmltag($forceFont);
+}
+
+// Pied de facture : mentions visibles sur le PDF. Recommandé mais non
+// bloquant — le XML embarqué reste conforme BR-FR-05 dans tous les cas.
+$freeTextDiag = getDolGlobalString('FACTURE_FREE_TEXT', '');
+if ($freeTextDiag === '') {
+	$diagErrors[] = [
+		'msg' => $langs->trans("LemonFacturXDiagFreeTextMissing"),
+		'fix' => '/custom/lemonfacturx/admin/setup.php?action=copynotestofreetext&token='.newToken(),
+		'fixlabel' => $langs->trans("LemonFacturXDiagFixFreeText"),
+	];
+} else {
+	$diagOk[] = $langs->trans("LemonFacturXDiagFreeTextOk");
 }
 
 // exec() requis pour le subprocess d'injection

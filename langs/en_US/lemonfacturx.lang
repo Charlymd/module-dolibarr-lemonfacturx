@@ -147,3 +147,12 @@ LemonFacturXAboutSvc5Title = Dolibarr deployment and hosting
 LemonFacturXAboutSvc5Desc = installation, migration, configuration, team training
 LemonFacturXAboutCTA = Let's talk about your project
 LemonFacturXAboutLocation = Clermont-Ferrand (France) — hello@hellolemon.fr
+
+# v3.1 — BR-FR-05 mentions bridge to the invoice footer (FACTURE_FREE_TEXT)
+LemonFacturXCopyNotesToFreeText = Copy these mentions to the Dolibarr invoice footer
+LemonFacturXCopyNotesToFreeTextHelp = Adds these three mentions to the "Complementary mention on invoices" (Setup > Modules > Invoices), printed at the bottom of every PDF — the human-readable invoice then shows the same thing as the embedded XML. Existing text is preserved: only missing mentions are added. Save your changes before copying.
+LemonFacturXCopyNotesDone = %s mention(s) added to the Dolibarr invoice footer ("Complementary mention on invoices")
+LemonFacturXCopyNotesAlready = All mentions are already present in the Dolibarr invoice footer
+LemonFacturXDiagFreeTextMissing = Dolibarr invoice footer empty ("Complementary mention on invoices") — the BR-FR-05 mentions are in the XML, but do not appear in plain text on the printed PDF. Recommended, not blocking.
+LemonFacturXDiagFreeTextOk = Dolibarr invoice footer filled (mentions visible on the PDF)
+LemonFacturXDiagFixFreeText = Copy the mentions (one click)

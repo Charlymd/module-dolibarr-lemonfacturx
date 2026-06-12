@@ -147,3 +147,12 @@ LemonFacturXAboutSvc5Title = Déploiement et hébergement Dolibarr
 LemonFacturXAboutSvc5Desc = installation, migration, paramétrage, formation des équipes
 LemonFacturXAboutCTA = Parlons de votre projet
 LemonFacturXAboutLocation = Clermont-Ferrand (63) — hello@hellolemon.fr
+
+# v3.1 — passerelle mentions BR-FR-05 vers le pied de facture (FACTURE_FREE_TEXT)
+LemonFacturXCopyNotesToFreeText = Recopier ces mentions dans le pied de facture Dolibarr
+LemonFacturXCopyNotesToFreeTextHelp = Ajoute ces trois mentions à la « Mention complémentaire sur les factures » (Configuration > Modules > Factures), imprimée en pied de chaque PDF — la facture lisible affiche alors la même chose que le XML embarqué. Le texte existant est conservé : seules les mentions absentes sont ajoutées. Enregistrez vos modifications avant de recopier.
+LemonFacturXCopyNotesDone = %s mention(s) ajoutée(s) au pied de facture Dolibarr (« Mention complémentaire sur les factures »)
+LemonFacturXCopyNotesAlready = Les mentions sont déjà toutes présentes dans le pied de facture Dolibarr
+LemonFacturXDiagFreeTextMissing = Pied de facture Dolibarr vide (« Mention complémentaire sur les factures ») — les mentions BR-FR-05 sont bien dans le XML, mais n'apparaissent pas en clair sur le PDF imprimé. Recommandé, non bloquant.
+LemonFacturXDiagFreeTextOk = Pied de facture Dolibarr renseigné (mentions visibles sur le PDF)
+LemonFacturXDiagFixFreeText = Recopier les mentions (en un clic)
