@@ -85,8 +85,11 @@ class modLemonFacturX extends DolibarrModules
 
 		// Onglet dédié « Chorus Pro » sur la fiche facture (regroupe les champs
 		// Chorus, masqués de l'affichage extrafields standard via list=0).
+		// NB : le type d'onglet pour les factures est « invoice » (et non
+		// « facture ») — c'est ce que passe facture_prepare_head() à
+		// complete_head_from_modules(). Avec « facture » l'onglet n'apparaît jamais.
 		$this->tabs = array(
-			'facture:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->lemonfacturx->enabled:/lemonfacturx/chorus_tab.php?id=__ID__',
+			'invoice:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->lemonfacturx->enabled:/lemonfacturx/chorus_tab.php?id=__ID__',
 		);
 	}
 
