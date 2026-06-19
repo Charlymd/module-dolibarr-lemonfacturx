@@ -147,16 +147,11 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 
 	// === ExchangedDocumentContext ===
 	$xml .= '<rsm:ExchangedDocumentContext>'."\n";
-	// BT-23 : cadre de facturation (process métier) — requis par les
-	// spécifications externes PPF/PDP pour qualifier le cas d'usage (B1, S1...)
-	// et par Chorus Pro B2G (A1...). Omis si non configuré.
-	$bt23 = trim(getDolGlobalString('LEMONFACTURX_BT23_PROCESS', ''));
-	// Profil Chorus Pro : le cadre de facturation (BT-23) est choisi PAR FACTURE
-	// parmi les 24 valeurs AIFE (A1..A25), et il est obligatoire pour le dépôt B2G.
-	// A1 (dépôt fournisseur) par défaut si non renseigné.
-	if ($profile === 'choruspro') {
-		$bt23 = !empty($options['cadre']) ? $options['cadre'] : 'A1';
-	}
+	// BT-23 : cadre de facturation (process métier). Choisi PAR FACTURE dans
+	// l'onglet Chorus pour le profil B2G (24 valeurs AIFE A1..A25, A1 par défaut).
+	// Le PDF standard (PDP/B2B) n'en émet pas — toléré, et évite un cadre figé
+	// global inadapté à chaque facture.
+	$bt23 = ($profile === 'choruspro') ? (!empty($options['cadre']) ? $options['cadre'] : 'A1') : '';
 	if ($bt23 !== '') {
 		$xml .= '  <ram:BusinessProcessSpecifiedDocumentContextParameter>'."\n";
 		$xml .= '    <ram:ID>'.lemonfacturx_xml_encode($bt23).'</ram:ID>'."\n";
@@ -284,10 +279,10 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 		$xml .= '    </ram:SpecifiedTradeSettlementPaymentMeans>'."\n";
 	}
 
-	// BT-8 : option TVA sur les débits (5) ou les encaissements (72), émise sur
-	// les catégories taxées uniquement. Mention obligatoire FR (décret 2022-1299)
-	// et donnée du socle de la réforme. Configurable, omise par défaut.
-	$dueDateTypeCode = trim(getDolGlobalString('LEMONFACTURX_VAT_DUE_DATE_TYPE', ''));
+	// BT-8 : exigibilité TVA (5 = débits, 72 = encaissements), émise sur les
+	// catégories taxées uniquement. Dérivée automatiquement du régime TVA de
+	// Dolibarr (constante TAX_MODE, Configuration > Taxes) — plus de réglage dédié.
+	$dueDateTypeCode = lemonfacturx_resolve_vat_due_date_code();
 
 	foreach ($breakdown as $amounts) {
 		$xml .= '    <ram:ApplicableTradeTax>'."\n";
@@ -937,7 +932,7 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode 
 function lemonfacturx_build_endpoint_uri($siren, $email)
 {
 	if (!empty($siren)) {
-		$scheme = getDolGlobalString('LEMONFACTURX_ENDPOINT_SCHEME', '0225');
+		$scheme = '0225';
 		$value  = $siren;
 	} elseif (!empty($email)) {
 		$scheme = 'EM';
@@ -1374,6 +1369,162 @@ function lemonfacturx_chorus_frameworks()
 		'A24' => 'A24 — MOE : décompte général définitif tacite',
 		'A25' => 'A25 — MOA : décompte général définitif tacite',
 	];
+}
+
+/**
+ * Recopie les 3 mentions légales BR-FR-05 (PMD/PMT/AAB) dans le pied de facture
+ * Dolibarr (FACTURE_FREE_TEXT). N'écrase jamais l'existant : seules les mentions
+ * absentes sont ajoutées. Idempotent.
+ *
+ * @param DoliDB $db
+ * @return int  Nombre de mentions ajoutées
+ */
+function lemonfacturx_append_notes_to_footer($db)
+{
+	global $conf;
+	$freeText = getDolGlobalString('FACTURE_FREE_TEXT', '');
+	$added = 0;
+	foreach (array(
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
+		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
+	) as $mention) {
+		$mention = trim($mention);
+		if ($mention === '' || strpos($freeText, $mention) !== false) {
+			continue;
+		}
+		$freeText = ($freeText !== '' ? rtrim($freeText)."\n" : '').$mention;
+		$added++;
+	}
+	if ($added > 0) {
+		dolibarr_set_const($db, 'FACTURE_FREE_TEXT', $freeText, 'chaine', 0, '', $conf->entity);
+	}
+	return $added;
+}
+
+/**
+ * Code d'exigibilité TVA (BT-8) dérivé du régime TVA de Dolibarr (constante
+ * TAX_MODE, Configuration > Taxes) — plus de réglage dédié dans le module.
+ *   TAX_MODE 1 = sur les débits      → '5'
+ *   TAX_MODE 2 = sur les encaissements → '72'
+ *   TAX_MODE 0 = standard (mixte) : on suit TAX_MODE_SELL_SERVICE si explicite,
+ *                sinon on omet (BT-8 optionnel, ne pas deviner).
+ *
+ * @return string  '5', '72' ou '' (omis)
+ */
+function lemonfacturx_resolve_vat_due_date_code()
+{
+	$mode = getDolGlobalInt('TAX_MODE', 0);
+	if ($mode === 1) {
+		return '5';
+	}
+	if ($mode === 2) {
+		return '72';
+	}
+	$sellService = getDolGlobalString('TAX_MODE_SELL_SERVICE', '');
+	if ($sellService === 'invoice') {
+		return '5';
+	}
+	if ($sellService === 'payment') {
+		return '72';
+	}
+	return '';
+}
+
+/**
+ * Résout le binaire PHP CLI pour le subprocess d'injection.
+ *  1. surcharge manuelle (LEMONFACTURX_PHP_CLI_PATH non vide) → utilisée telle quelle ;
+ *  2. cache (LEMONFACTURX_PHP_CLI_CACHE) encore valide → réutilisé ;
+ *  3. sinon auto-détection puis mise en cache.
+ *
+ * @param DoliDB $db
+ * @return string  Chemin/commande du binaire PHP CLI ('php' en dernier recours)
+ */
+function lemonfacturx_resolve_php_cli($db)
+{
+	// 'php' nu (ancien défaut) = pas une vraie surcharge → on auto-détecte (qui
+	// fera mieux, et retombe sur 'php' au pire). Une surcharge = un chemin précis.
+	$manual = trim(getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', ''));
+	if ($manual !== '' && $manual !== 'php') {
+		return $manual;
+	}
+	$cache = trim(getDolGlobalString('LEMONFACTURX_PHP_CLI_CACHE', ''));
+	if ($cache !== '' && lemonfacturx_php_cli_is_valid($cache)) {
+		return $cache;
+	}
+	$detected = lemonfacturx_detect_php_cli();
+	// Mise en cache best-effort : dolibarr_set_const() vit dans admin.lib.php,
+	// chargée par main.inc.php en contexte web/hook mais pas dans un bootstrap CLI
+	// minimal — on ne casse pas la résolution si elle est absente.
+	if ($detected !== '' && is_object($db) && function_exists('dolibarr_set_const')) {
+		dolibarr_set_const($db, 'LEMONFACTURX_PHP_CLI_CACHE', $detected, 'chaine', 0, '', 0);
+	}
+	return $detected !== '' ? $detected : 'php';
+}
+
+/**
+ * Sonde une liste de candidats et renvoie le premier binaire PHP CLI dont le
+ * SAPI est « cli » ET dont la version major.minor correspond à celle du web
+ * (pour ne pas prendre un PHP d'une autre version). Renvoie '' si rien.
+ *
+ * NB : en contexte FPM, PHP_BINARY pointe sur php-fpm (inutilisable en CLI) —
+ * on en déduit un candidat CLI en remplaçant php-fpm→php et sbin→bin.
+ *
+ * @return string
+ */
+function lemonfacturx_detect_php_cli()
+{
+	if (!function_exists('exec')) {
+		return '';
+	}
+	$want = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+	$candidates = array();
+	if (defined('PHP_BINARY') && PHP_BINARY !== '') {
+		$candidates[] = str_replace(array('php-fpm', '/sbin/'), array('php', '/bin/'), PHP_BINARY);
+	}
+	foreach (array('/usr/bin/', '/usr/local/bin/', '') as $dir) {
+		$candidates[] = $dir.'php'.$want;
+		$candidates[] = $dir.'php'.PHP_MAJOR_VERSION;
+		$candidates[] = $dir.'php';
+	}
+	$seen = array();
+	foreach ($candidates as $cand) {
+		if ($cand === '' || isset($seen[$cand])) {
+			continue;
+		}
+		$seen[$cand] = true;
+		if (lemonfacturx_php_cli_is_valid($cand, $want)) {
+			return $cand;
+		}
+	}
+	return '';
+}
+
+/**
+ * Vérifie qu'un candidat est un binaire PHP CLI exécutable (SAPI cli), et
+ * éventuellement de la version attendue.
+ *
+ * @param string $cand
+ * @param string $wantVersion  major.minor attendu, ou '' pour ne pas vérifier
+ * @return bool
+ */
+function lemonfacturx_php_cli_is_valid($cand, $wantVersion = '')
+{
+	if (!function_exists('exec')) {
+		return false;
+	}
+	$out = array();
+	$rc = 1;
+	@exec(escapeshellarg($cand).' -r '.escapeshellarg('echo PHP_SAPI."|".PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;').' 2>/dev/null', $out, $rc);
+	$line = isset($out[0]) ? trim($out[0]) : '';
+	if ($rc !== 0 || strpos($line, 'cli|') !== 0) {
+		return false;
+	}
+	if ($wantVersion !== '') {
+		$parts = explode('|', $line);
+		return isset($parts[1]) && $parts[1] === $wantVersion;
+	}
+	return true;
 }
 
 /**

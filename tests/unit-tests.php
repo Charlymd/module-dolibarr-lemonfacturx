@@ -427,10 +427,9 @@ lfx_assert_eq(2, $xp->query('//ram:ApplicableHeaderTradeSettlement/ram:Applicabl
 echo "U13 OK\n";
 
 // ---------------------------------------------------------------------------
-$currentTest = 'U14 BT-23 + BT-8 + BT-10 + BT-13';
+$currentTest = 'U14 BT-8 (depuis TAX_MODE) + BT-10 + BT-13';
 lfx_reset([
-	'LEMONFACTURX_BT23_PROCESS' => 'B1',
-	'LEMONFACTURX_VAT_DUE_DATE_TYPE' => '72',
+	'TAX_MODE' => 2,
 ], ['iban' => 'FR7630006000011234567890189', 'bic' => 'AGRIFRPP'], [
 	'element_element' => [(object) ['ref' => 'CO2606-0042']],
 ]);
@@ -447,8 +446,9 @@ $w = [];
 $xml = lemonfacturx_build_xml($inv, $mysoc, $w);
 lfx_std_validate($xml, $xsdPath);
 $xp = lfx_xpath($xml);
-lfx_assert_eq('B1', lfx_xp_str($xp, '//ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID'), 'BT-23 cadre de facturation');
-lfx_assert_eq('72', lfx_xp_str($xp, '//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:DueDateTypeCode'), 'BT-8 TVA sur encaissements');
+// BT-23 n'est plus émis sur le PDF principal (PDP) — il est par-facture en profil Chorus (cf. U01c)
+lfx_assert_eq(0, $xp->query('//ram:BusinessProcessSpecifiedDocumentContextParameter')->length, 'BT-23 absent du profil PDP');
+lfx_assert_eq('72', lfx_xp_str($xp, '//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:DueDateTypeCode'), 'BT-8 = 72 (TAX_MODE=2 encaissements)');
 lfx_assert_eq('SERVICE-ACHATS-75', lfx_xp_str($xp, '//ram:BuyerReference'), 'BT-10 ref client');
 lfx_assert_eq('CO2606-0042', lfx_xp_str($xp, '//ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID'), 'BT-13 commande liée');
 echo "U14 OK\n";

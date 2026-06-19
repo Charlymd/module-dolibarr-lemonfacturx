@@ -117,9 +117,6 @@ class LemonfacturxApi extends DolibarrApi
 	 */
 	protected function loadInvoice($id)
 	{
-		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
-			throw new RestException(403, 'LemonFacturX conversion is disabled (LEMONFACTURX_ENABLED=0)');
-		}
 		if (!DolibarrApiAccess::$user->hasRight('facture', 'lire')) {
 			throw new RestException(403, 'Insufficient rights to read invoices');
 		}

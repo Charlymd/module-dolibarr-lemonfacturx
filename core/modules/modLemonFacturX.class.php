@@ -60,19 +60,21 @@ class modLemonFacturX extends DolibarrModules
 		$this->conflictwith = array();
 		$this->langfiles = array("lemonfacturx@lemonfacturx");
 
+		// NB : la conversion est active dès que le module l'est (plus de constante
+		// LEMONFACTURX_ENABLED). L'identifiant légal (auto par profil), l'exigibilité
+		// TVA BT-8 (lue depuis TAX_MODE Dolibarr), le cadre BT-23 (par facture) et le
+		// schéma d'endpoint (0225 figé) ne sont plus des réglages.
 		$this->const = array(
-			array('LEMONFACTURX_ENABLED', 'int', '1', 'Activer la conversion Factur-X', 1, 'current', 0),
 			array('LEMONFACTURX_BANK_ACCOUNT', 'int', '0', 'ID du compte bancaire pour IBAN/BIC', 1, 'current', 0),
 			array('LEMONFACTURX_PAYMENT_MEANS', 'chaine', '30', 'Code moyen de paiement UNTDID 4461 (30=virement, 58=virement SEPA, 59=prélèvement SEPA, 49=prélèvement)', 1, 'current', 0),
 			array('LEMONFACTURX_STRICT_MODE', 'int', '0', 'Mode erreur : 0 = best-effort, 1 = strict bloquant', 1, 'current', 0),
 			array('LEMONFACTURX_BR_CHECK', 'int', '1', 'Contrôle interne des règles métier EN16931 (BR-*) avant injection', 1, 'current', 0),
-			array('LEMONFACTURX_VAT_DUE_DATE_TYPE', 'chaine', '', 'BT-8 exigibilité TVA : vide (omis), 5 = débits, 72 = encaissements', 1, 'current', 0),
-			array('LEMONFACTURX_BT23_PROCESS', 'chaine', '', 'BT-23 cadre de facturation (A1 Chorus Pro B2G, B1/S1/S2 réforme FR...), omis si vide', 1, 'current', 0),
-			array('LEMONFACTURX_PHP_CLI_PATH', 'chaine', 'php', 'Chemin du binaire PHP CLI pour subprocess injection', 1, 'current', 0),
+			array('LEMONFACTURX_PHP_CLI_PATH', 'chaine', '', 'Surcharge manuelle du binaire PHP CLI (vide = auto-détection)', 1, 'current', 0),
 			array('LEMONFACTURX_VERAPDF_PATH', 'chaine', '', 'Chemin du binaire veraPDF pour post-validation PDF/A-3 (optionnel)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_PMD', 'chaine', '', 'Mention légale pénalités de retard (BR-FR-05, default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_PMT', 'chaine', '', 'Mention légale indemnité de recouvrement (default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_AAB', 'chaine', '', 'Mention légale escompte anticipé (default appliqué si vide)', 1, 'current', 0),
+			array('LEMONFACTURX_NOTES_IN_FOOTER', 'int', '0', 'Recopier les mentions BR-FR-05 dans le pied de facture (FACTURE_FREE_TEXT)', 1, 'current', 0),
 			array('LEMONFACTURX_CHORUS_ENABLED', 'int', '0', 'Activer les fonctionnalités Chorus Pro (onglet, menu, 2e PDF) — opt-in', 1, 'current', 0),
 		);
 

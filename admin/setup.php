@@ -47,12 +47,8 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$error = 0;
 
 	$updates = [
-		['LEMONFACTURX_ENABLED',      GETPOSTINT('LEMONFACTURX_ENABLED'),         'int'],
 		['LEMONFACTURX_BANK_ACCOUNT', GETPOSTINT('LEMONFACTURX_BANK_ACCOUNT'),    'int'],
 		['LEMONFACTURX_PAYMENT_MEANS',trim(GETPOST('LEMONFACTURX_PAYMENT_MEANS', 'alpha')), 'chaine'],
-		['LEMONFACTURX_ENDPOINT_SCHEME',trim(GETPOST('LEMONFACTURX_ENDPOINT_SCHEME', 'alpha')), 'chaine'],
-		['LEMONFACTURX_VAT_DUE_DATE_TYPE',trim(GETPOST('LEMONFACTURX_VAT_DUE_DATE_TYPE', 'alpha')), 'chaine'],
-		['LEMONFACTURX_BT23_PROCESS', trim(GETPOST('LEMONFACTURX_BT23_PROCESS', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_STRICT_MODE',  GETPOSTINT('LEMONFACTURX_STRICT_MODE'),     'int'],
 		['LEMONFACTURX_BR_CHECK',     GETPOSTINT('LEMONFACTURX_BR_CHECK'),        'int'],
 		['LEMONFACTURX_CHORUS_ENABLED', GETPOSTINT('LEMONFACTURX_CHORUS_ENABLED'), 'int'],
@@ -61,6 +57,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		['LEMONFACTURX_NOTE_PMD',     trim(GETPOST('LEMONFACTURX_NOTE_PMD', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTE_PMT',     trim(GETPOST('LEMONFACTURX_NOTE_PMT', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTE_AAB',     trim(GETPOST('LEMONFACTURX_NOTE_AAB', 'restricthtml')),    'chaine'],
+		['LEMONFACTURX_NOTES_IN_FOOTER', GETPOSTINT('LEMONFACTURX_NOTES_IN_FOOTER'), 'int'],
 	];
 	foreach ($updates as $u) {
 		if (dolibarr_set_const($db, $u[0], $u[1], $u[2], 0, '', $conf->entity) < 0) {
@@ -68,44 +65,21 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		}
 	}
 
+	// Toggle « recopier les mentions en pied » à Oui → on (re)pousse les mentions
+	// manquantes dans FACTURE_FREE_TEXT (sans toucher l'existant). Idempotent.
+	$footerAdded = 0;
+	if (!$error && GETPOSTINT('LEMONFACTURX_NOTES_IN_FOOTER')) {
+		$footerAdded = lemonfacturx_append_notes_to_footer($db);
+	}
+
 	if (!$error) {
-		setEventMessages($langs->trans("SetupSaved"), null, 'mesgs');
+		$msg = $langs->trans("SetupSaved");
+		if ($footerAdded > 0) {
+			$msg .= ' — '.$langs->trans('LemonFacturXCopyNotesDone', $footerAdded);
+		}
+		setEventMessages($msg, null, 'mesgs');
 	} else {
 		setEventMessages($langs->trans("Error"), null, 'errors');
-	}
-}
-
-// Recopie des 3 mentions BR-FR-05 dans le pied de facture Dolibarr
-// (FACTURE_FREE_TEXT, « Mention complémentaire sur les factures ») pour que
-// le PDF lisible affiche la même chose que le XML embarqué. Dolibarr n'a
-// aucun champ natif structuré pour ces mentions, uniquement ce texte libre.
-// On n'écrase jamais l'existant : seules les mentions absentes sont ajoutées.
-if ($action == 'copynotestofreetext') {
-	if (GETPOST('token', 'alpha') !== currentToken()) {
-		accessforbidden('Bad value for CSRF token');
-	}
-	$freeText = getDolGlobalString('FACTURE_FREE_TEXT', '');
-	$added = 0;
-	foreach (array(
-		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
-		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
-		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
-	) as $mention) {
-		$mention = trim($mention);
-		if ($mention === '' || strpos($freeText, $mention) !== false) {
-			continue;
-		}
-		$freeText = ($freeText !== '' ? rtrim($freeText)."\n" : '').$mention;
-		$added++;
-	}
-	if ($added > 0) {
-		if (dolibarr_set_const($db, 'FACTURE_FREE_TEXT', $freeText, 'chaine', 0, '', $conf->entity) > 0) {
-			setEventMessages($langs->trans('LemonFacturXCopyNotesDone', $added), null, 'mesgs');
-		} else {
-			setEventMessages($langs->trans('Error'), null, 'errors');
-		}
-	} else {
-		setEventMessages($langs->trans('LemonFacturXCopyNotesAlready'), null, 'mesgs');
 	}
 }
 
@@ -145,202 +119,84 @@ print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="update">';
 
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre">';
-print '<td>'.$langs->trans("Parameter").'</td>';
-print '<td>'.$langs->trans("Value").'</td>';
-print '</tr>';
+print '<tr class="liste_titre"><td>'.$langs->trans("Parameter").'</td><td>'.$langs->trans("Value").'</td></tr>';
 
-// Activer/Désactiver
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXEnabled").'</td>';
-print '<td>';
-print '<select name="LEMONFACTURX_ENABLED" class="flat">';
-print '<option value="0"'.(!getDolGlobalInt('LEMONFACTURX_ENABLED') ? ' selected' : '').'>'.$langs->trans("No").'</option>';
-print '<option value="1"'.(getDolGlobalInt('LEMONFACTURX_ENABLED') ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
+// ---- Bloc 1 : Facturation ----
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXSecBilling").'</td></tr>';
 
-// Compte bancaire (IBAN/BIC)
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXBankAccount").'</td>';
-print '<td>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXBankAccount").'</td><td>';
 $currentBankAccount = getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT');
-$sql = "SELECT rowid, label, iban_prefix, bic FROM ".MAIN_DB_PREFIX."bank_account WHERE clos = 0 AND entity IN (".getEntity('bank_account').") ORDER BY label";
-$resql = $db->query($sql);
+$resql = $db->query("SELECT rowid, label, iban_prefix, bic FROM ".MAIN_DB_PREFIX."bank_account WHERE clos = 0 AND entity IN (".getEntity('bank_account').") ORDER BY label");
 print '<select name="LEMONFACTURX_BANK_ACCOUNT" class="flat minwidth300">';
 print '<option value="0">-- '.$langs->trans("Select").' --</option>';
 if ($resql) {
 	while ($obj = $db->fetch_object($resql)) {
 		$infoIban = !empty($obj->iban_prefix) ? ' ('.lemonfacturx_iban_short($obj->iban_prefix).')' : ' (pas d\'IBAN)';
-		print '<option value="'.$obj->rowid.'"'.($currentBankAccount == $obj->rowid ? ' selected' : '').'>';
-		print dol_escape_htmltag($obj->label.$infoIban);
-		print '</option>';
+		print '<option value="'.$obj->rowid.'"'.($currentBankAccount == $obj->rowid ? ' selected' : '').'>'.dol_escape_htmltag($obj->label.$infoIban).'</option>';
 	}
 }
-print '</select>';
-print '</td>';
-print '</tr>';
+print '</select></td></tr>';
 
-// Moyen de paiement
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXPaymentMeans").'</td>';
-print '<td>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXPaymentMeans").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPaymentMeansHint").'</span></td><td>';
 $currentMeans = getDolGlobalString('LEMONFACTURX_PAYMENT_MEANS', '30');
 print '<select name="LEMONFACTURX_PAYMENT_MEANS" class="flat">';
-print '<option value="30"'.($currentMeans == '30' ? ' selected' : '').'>30 - '.$langs->trans("PaymentMeans30").'</option>';
-print '<option value="58"'.($currentMeans == '58' ? ' selected' : '').'>58 - '.$langs->trans("PaymentMeans58").'</option>';
-print '<option value="59"'.($currentMeans == '59' ? ' selected' : '').'>59 - '.$langs->trans("PaymentMeans59").'</option>';
-print '<option value="49"'.($currentMeans == '49' ? ' selected' : '').'>49 - '.$langs->trans("PaymentMeans49").'</option>';
-print '</select>';
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPaymentMeansHint").'</span>';
-print '</td>';
-print '</tr>';
+foreach (array('30'=>'PaymentMeans30','58'=>'PaymentMeans58','59'=>'PaymentMeans59','49'=>'PaymentMeans49') as $code=>$k) {
+	print '<option value="'.$code.'"'.($currentMeans == $code ? ' selected' : '').'>'.$code.' - '.$langs->trans($k).'</option>';
+}
+print '</select></td></tr>';
 
-// Identifiant légal BT-30 / BT-47 : toujours SIRET sous schéma ISO 6523 0009
-// (seul couple conforme et accepté par Chorus Pro). Plus de réglage : les anciens
-// couples SIREN/0002 et SIRET/0002 produisaient des identifiants refusés ou malformés.
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXLegalIdScheme").'</td>';
-print '<td><span class="opacitymedium">'.$langs->trans("LegalIdSchemeSiret0009").'</span></td>';
-print '</tr>';
-
-// BT-8 : exigibilité de la TVA (débits / encaissements)
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXVatDueDateType");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXVatDueDateTypeHint").'</span>';
-print '</td>';
-print '<td>';
-$dueType = getDolGlobalString('LEMONFACTURX_VAT_DUE_DATE_TYPE', '');
-print '<select name="LEMONFACTURX_VAT_DUE_DATE_TYPE" class="flat">';
-print '<option value=""'.($dueType == '' ? ' selected' : '').'>'.$langs->trans("VatDueDateTypeNone").'</option>';
-print '<option value="72"'.($dueType == '72' ? ' selected' : '').'>72 - '.$langs->trans("VatDueDateType72").'</option>';
-print '<option value="5"'.($dueType == '5' ? ' selected' : '').'>5 - '.$langs->trans("VatDueDateType5").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
-
-// BT-23 : cadre de facturation
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXBt23Process");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXBt23ProcessHint").'</span>';
-print '</td>';
-print '<td>';
-print '<input type="text" name="LEMONFACTURX_BT23_PROCESS" class="flat minwidth100" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_BT23_PROCESS', '')).'" placeholder="A1, B1, S1...">';
-print '</td>';
-print '</tr>';
-
-// Contrôle interne des règles métier EN16931
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXBrCheck");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXBrCheckHint").'</span>';
-print '</td>';
-print '<td>';
-$brCheck = getDolGlobalInt('LEMONFACTURX_BR_CHECK', 1);
-print '<select name="LEMONFACTURX_BR_CHECK" class="flat">';
-print '<option value="1"'.($brCheck ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
-print '<option value="0"'.(!$brCheck ? ' selected' : '').'>'.$langs->trans("No").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
-
-// Fonctionnalités Chorus Pro (secteur public) — opt-in
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXChorusEnabled");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXChorusEnabledHint").'</span>';
-print '</td>';
-print '<td>';
-$chorusEnabled = getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED', 0);
-print '<select name="LEMONFACTURX_CHORUS_ENABLED" class="flat">';
-print '<option value="0"'.(!$chorusEnabled ? ' selected' : '').'>'.$langs->trans("No").'</option>';
-print '<option value="1"'.($chorusEnabled ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
-
-// Chemin veraPDF (post-validation PDF/A-3 optionnelle)
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXVeraPdfPath");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXVeraPdfPathHint").'</span>';
-print '</td>';
-print '<td>';
-print '<input type="text" name="LEMONFACTURX_VERAPDF_PATH" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_VERAPDF_PATH', '')).'" placeholder="/usr/local/bin/verapdf">';
-print '</td>';
-print '</tr>';
-
-// Schéma d'adressage de l'endpoint (BT-34 / BT-49)
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXEndpointScheme");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXEndpointSchemeHint").'</span>';
-print '</td>';
-print '<td>';
-$endpointScheme = getDolGlobalString('LEMONFACTURX_ENDPOINT_SCHEME', '0225');
-print '<select name="LEMONFACTURX_ENDPOINT_SCHEME" class="flat">';
-print '<option value="0225"'.($endpointScheme == '0225' ? ' selected' : '').'>0225 - '.$langs->trans("EndpointScheme0225").'</option>';
-print '<option value="0002"'.($endpointScheme == '0002' ? ' selected' : '').'>0002 - '.$langs->trans("EndpointScheme0002").'</option>';
-print '<option value="0009"'.($endpointScheme == '0009' ? ' selected' : '').'>0009 - '.$langs->trans("EndpointScheme0009").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
-
-// Mode strict
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXStrictMode");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXStrictModeHint").'</span>';
-print '</td>';
-print '<td>';
-$strict = getDolGlobalInt('LEMONFACTURX_STRICT_MODE', 0);
-print '<select name="LEMONFACTURX_STRICT_MODE" class="flat">';
-print '<option value="0"'.($strict == 0 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeBestEffort").'</option>';
-print '<option value="1"'.($strict == 1 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeStrict").'</option>';
-print '</select>';
-print '</td>';
-print '</tr>';
-
-// Chemin PHP CLI
-print '<tr class="oddeven">';
-print '<td>'.$langs->trans("LemonFacturXPhpCliPath");
-print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPhpCliPathHint").'</span>';
-print '</td>';
-print '<td>';
-print '<input type="text" name="LEMONFACTURX_PHP_CLI_PATH" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', 'php')).'" placeholder="php ou /usr/bin/php8.2">';
-print '</td>';
-print '</tr>';
-
-// Mentions légales BR-FR : PMD / PMT / AAB
+// ---- Bloc 2 : Mentions légales ----
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXLegalNotes").'</td></tr>';
-
 foreach ([
 	['LEMONFACTURX_NOTE_PMD', 'LemonFacturXNotePMD', LEMONFACTURX_DEFAULT_NOTE_PMD],
 	['LEMONFACTURX_NOTE_PMT', 'LemonFacturXNotePMT', LEMONFACTURX_DEFAULT_NOTE_PMT],
 	['LEMONFACTURX_NOTE_AAB', 'LemonFacturXNoteAAB', LEMONFACTURX_DEFAULT_NOTE_AAB],
 ] as $note) {
-	// Affiche le texte par défaut quand la constante est vide (les constantes sont
-	// créées vides à l'activation : sans ce garde-fou le champ et le XML restaient vides).
 	$val = lemonfacturx_conf_or_default($note[0], $note[2]);
-	print '<tr class="oddeven">';
-	print '<td>'.$langs->trans($note[1]).'</td>';
-	print '<td><textarea name="'.$note[0].'" class="flat minwidth500" rows="3">'.dol_escape_htmltag($val).'</textarea></td>';
-	print '</tr>';
+	print '<tr class="oddeven"><td>'.$langs->trans($note[1]).'</td><td><textarea name="'.$note[0].'" class="flat minwidth500" rows="3">'.dol_escape_htmltag($val).'</textarea></td></tr>';
 }
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXNotesInFooter").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXNotesInFooterHint").'</span></td><td>';
+$notesFooter = getDolGlobalInt('LEMONFACTURX_NOTES_IN_FOOTER', 0);
+print '<select name="LEMONFACTURX_NOTES_IN_FOOTER" class="flat">';
+print '<option value="0"'.(!$notesFooter ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($notesFooter ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select></td></tr>';
 
-// Passerelle vers le PDF visible : ces mentions ne vivent que dans le XML
-// embarqué ; pour les imprimer en clair, Dolibarr n'a que le texte libre
-// FACTURE_FREE_TEXT (pied de facture). Bouton de recopie en un clic.
-print '<tr class="oddeven">';
-print '<td colspan="2">';
-print '<a class="butActionSmall" href="'.dol_escape_htmltag($_SERVER["PHP_SELF"].'?action=copynotestofreetext&token='.newToken()).'">'.$langs->trans('LemonFacturXCopyNotesToFreeText').'</a>';
-print '<br><span class="opacitymedium">'.$langs->trans('LemonFacturXCopyNotesToFreeTextHelp').'</span>';
-print '</td>';
-print '</tr>';
+// ---- Bloc 3 : Secteur public (Chorus Pro) ----
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXSecPublic").'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXChorusEnabled").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXChorusEnabledHint").'</span></td><td>';
+$chorusEnabled = getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED', 0);
+print '<select name="LEMONFACTURX_CHORUS_ENABLED" class="flat">';
+print '<option value="0"'.(!$chorusEnabled ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($chorusEnabled ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select></td></tr>';
+
+// ---- Bloc 4 : Validation & conformité ----
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXSecValidation").'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXBrCheck").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXBrCheckHint").'</span></td><td>';
+$brCheck = getDolGlobalInt('LEMONFACTURX_BR_CHECK', 1);
+print '<select name="LEMONFACTURX_BR_CHECK" class="flat">';
+print '<option value="1"'.($brCheck ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '<option value="0"'.(!$brCheck ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '</select></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXStrictMode").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXStrictModeHint").'</span></td><td>';
+$strict = getDolGlobalInt('LEMONFACTURX_STRICT_MODE', 0);
+print '<select name="LEMONFACTURX_STRICT_MODE" class="flat">';
+print '<option value="0"'.($strict == 0 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeBestEffort").'</option>';
+print '<option value="1"'.($strict == 1 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeStrict").'</option>';
+print '</select></td></tr>';
+
+// ---- Bloc 5 : Technique (avancé) ----
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXSecTech").'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXPhpCliPath").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPhpCliPathHint").'</span></td><td>';
+print '<input type="text" name="LEMONFACTURX_PHP_CLI_PATH" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', '')).'" placeholder="'.$langs->trans("LemonFacturXPhpCliAutoPlaceholder").'"></td></tr>';
+// veraPDF : outil EXTERNE optionnel, non embarqué et non installé par défaut.
+// Vide = pas de post-validation (le contrôle XSD + règles BR internes reste actif).
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXVeraPdfPath").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXVeraPdfPathHint").'</span></td><td>';
+print '<input type="text" name="LEMONFACTURX_VERAPDF_PATH" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_VERAPDF_PATH', '')).'" placeholder="'.$langs->trans("LemonFacturXVeraPdfPlaceholder").'"></td></tr>';
 
 print '</table>';
-
-print '<br>';
-print '<div class="center">';
-print '<input type="submit" class="button button-save" value="'.$langs->trans("Save").'">';
-print '</div>';
-
+print '<br><div class="center"><input type="submit" class="button button-save" value="'.$langs->trans("Save").'"></div>';
 print '</form>';
 
 // Info
@@ -354,6 +210,7 @@ print '<br>';
 print load_fiche_titre($langs->trans("LemonFacturXDiagTitle"), '', '');
 
 $diagErrors = [];
+$diagWarnings = []; // points recommandés mais NON bloquants (orange, pas rouge)
 $diagOk = [];
 
 /**
@@ -433,15 +290,14 @@ if ($forceFont === '') {
 	$diagOk[] = $langs->trans("LemonFacturXDiagForceFontOk").' : '.dol_escape_htmltag($forceFont);
 }
 
-// Pied de facture : mentions visibles sur le PDF. Recommandé mais non
-// bloquant — le XML embarqué reste conforme BR-FR-05 dans tous les cas.
+// Pied de facture : mentions visibles sur le PDF. Recommandé mais NON
+// bloquant — le XML embarqué reste conforme BR-FR-05 dans tous les cas. On
+// l'affiche en avertissement (orange) et PUREMENT informatif : le diagnostic
+// constate, c'est le toggle « recopier les mentions en pied » du bloc Mentions
+// légales qui règle (comme les autres items, pas de contrôle dans le diag).
 $freeTextDiag = getDolGlobalString('FACTURE_FREE_TEXT', '');
 if ($freeTextDiag === '') {
-	$diagErrors[] = [
-		'msg' => $langs->trans("LemonFacturXDiagFreeTextMissing"),
-		'fix' => '/custom/lemonfacturx/admin/setup.php?action=copynotestofreetext&token='.newToken(),
-		'fixlabel' => $langs->trans("LemonFacturXDiagFixFreeText"),
-	];
+	$diagWarnings[] = ['msg' => $langs->trans("LemonFacturXDiagFreeTextMissing")];
 } else {
 	$diagOk[] = $langs->trans("LemonFacturXDiagFreeTextOk");
 }
@@ -453,14 +309,17 @@ if (!function_exists('exec')) {
 	$diagOk[] = $langs->trans("LemonFacturXDiagExecEnabled");
 }
 
-// Binaire PHP CLI configuré : si chemin absolu, vérifier qu'il est exécutable
-$phpCliPath = getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', 'php');
-if (strpos($phpCliPath, '/') !== false || strpos($phpCliPath, '\\') !== false) {
-	if (is_executable($phpCliPath)) {
-		$diagOk[] = $langs->trans("LemonFacturXDiagPhpCliOk").' : '.dol_escape_htmltag($phpCliPath);
-	} else {
-		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", dol_escape_htmltag($phpCliPath)), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
-	}
+// Binaire PHP CLI : auto-détecté (ou surchargé). On affiche le chemin résolu
+// et on vérifie qu'il répond bien comme un CLI valide.
+$phpCliManual = trim(getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', ''));
+// 'php' nu = pas une vraie surcharge (cohérent avec lemonfacturx_resolve_php_cli) → auto.
+$phpCliIsAuto = ($phpCliManual === '' || $phpCliManual === 'php');
+$phpCliResolved = lemonfacturx_resolve_php_cli($db);
+$phpCliLabel = $phpCliResolved.($phpCliIsAuto ? ' ('.$langs->trans("LemonFacturXDiagPhpCliAuto").')' : '');
+if (lemonfacturx_php_cli_is_valid($phpCliResolved)) {
+	$diagOk[] = $langs->trans("LemonFacturXDiagPhpCliOk").' : '.dol_escape_htmltag($phpCliLabel);
+} else {
+	$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", dol_escape_htmltag($phpCliResolved)), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
 }
 
 // Multidevise : avertissement informatif (les factures en devise étrangère sont ignorées)
@@ -479,9 +338,23 @@ foreach ($diagErrors as $err) {
 	print '<tr class="oddeven"><td><span style="color: red;">&#10008;</span> <strong>'.$err['msg'].'</strong></td>';
 	print '<td><a href="'.DOL_URL_ROOT.$err['fix'].'">'.$fixLabel.'</a></td></tr>';
 }
+// Avertissements : recommandés, non bloquants → pastille orange, pas de croix
+// rouge. Purement informatifs (constat), le réglage se fait dans les options ;
+// un lien éventuel n'est affiché que s'il est explicitement fourni.
+foreach ($diagWarnings as $warn) {
+	print '<tr class="oddeven"><td><span style="color: #e67e22;">&#9888;</span> '.$warn['msg'].'</td><td>';
+	if (!empty($warn['fix'])) {
+		$fixLabel = !empty($warn['fixlabel']) ? $warn['fixlabel'] : $langs->trans("LemonFacturXDiagFixLink");
+		print '<a href="'.DOL_URL_ROOT.$warn['fix'].'">'.$fixLabel.'</a>';
+	}
+	print '</td></tr>';
+}
 
 if (empty($diagErrors)) {
-	print '<tr class="oddeven"><td colspan="2"><span style="color: green;"><strong>'.$langs->trans("LemonFacturXDiagAllOk").'</strong></span></td></tr>';
+	// Pas de blocage : message vert. S'il reste des avertissements (recommandés),
+	// on le dit autrement pour ne pas laisser croire que tout est parfait.
+	$allOkKey = empty($diagWarnings) ? "LemonFacturXDiagAllOk" : "LemonFacturXDiagNoBlocker";
+	print '<tr class="oddeven"><td colspan="2"><span style="color: green;"><strong>'.$langs->trans($allOkKey).'</strong></span></td></tr>';
 }
 
 print '</table>';

@@ -37,9 +37,6 @@ class ActionsLemonFacturX
 	{
 		global $mysoc, $langs;
 
-		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
-			return 0;
-		}
 
 		$invoice = $parameters['object'] ?? null;
 		if (!is_object($invoice) || !($invoice instanceof Facture)) {
@@ -325,9 +322,6 @@ class ActionsLemonFacturX
 	{
 		global $user, $langs;
 
-		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
-			return 0;
-		}
 		$contexts = explode(':', $parameters['context'] ?? '');
 		if (!in_array('invoicecard', $contexts, true)) {
 			return 0;
@@ -379,9 +373,6 @@ class ActionsLemonFacturX
 	{
 		global $conf, $user, $langs, $mysoc;
 
-		if (!getDolGlobalInt('LEMONFACTURX_ENABLED')) {
-			return 0;
-		}
 		$contexts = explode(':', $parameters['context'] ?? '');
 		if (!in_array('invoicecard', $contexts, true)) {
 			return 0;
@@ -574,6 +565,15 @@ class ActionsLemonFacturX
 	 */
 	protected function resolvePhpBinary($strict)
 	{
+		// Sans surcharge manuelle, on auto-détecte le binaire CLI (avec cache) :
+		// version major.minor du web, en évitant le piège PHP_BINARY=php-fpm en FPM.
+		// 'php' nu (ancien défaut résiduel des activations passées) = pas une vraie
+		// surcharge → auto-détection aussi.
+		$manual = trim(getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', ''));
+		if ($manual === '' || $manual === 'php') {
+			return lemonfacturx_resolve_php_cli($this->db);
+		}
+
 		$phpBin = getDolGlobalString('LEMONFACTURX_PHP_CLI_PATH', 'php');
 
 		// Hardening : la constante est modifiable par un admin via /admin/const.php.

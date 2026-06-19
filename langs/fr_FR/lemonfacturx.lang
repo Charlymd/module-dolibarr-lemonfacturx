@@ -29,8 +29,9 @@ LemonFacturXBt23Process = Cadre de facturation (BT-23)
 LemonFacturXBt23ProcessHint = BusinessProcess du contexte documentaire. Chorus Pro B2G : A1 (dépôt facture), A2 (facture déjà payée)... Réforme FR (PPF/PDP) : B1, S1, S2, M1... Laisser vide pour omettre (toléré tant que votre plateforme ne l'exige pas).
 LemonFacturXBrCheck = Contrôle des règles métier EN16931
 LemonFacturXBrCheckHint = Vérifie avant injection un sous-ensemble des règles Schematron EN16931 (BR-CO-10..17, BR-27, BR-61, BR-IC-11/12, cohérence des catégories TVA...). Violations bloquantes en mode strict, ajoutées aux avertissements sinon.
-LemonFacturXVeraPdfPath = Chemin du binaire veraPDF (optionnel)
-LemonFacturXVeraPdfPathHint = Si renseigné, chaque PDF généré est validé PDF/A-3b par veraPDF après injection (https://verapdf.org). Non bloquant : un échec ajoute un avertissement. Ralentit la génération de quelques secondes.
+LemonFacturXVeraPdfPath = Validation PDF/A-3 par veraPDF (optionnel, outil externe)
+LemonFacturXVeraPdfPathHint = Vide par défaut = désactivé, et c'est très bien ainsi : le contrôle XSD EN16931 + les règles BR internes tournent déjà. veraPDF n'est PAS fourni avec le module — c'est un outil tiers à installer vous-même (https://verapdf.org), puis à pointer ici. Si renseigné, chaque PDF est revalidé PDF/A-3b après injection : non bloquant (un échec ajoute juste un avertissement), ralentit la génération de quelques secondes.
+LemonFacturXVeraPdfPlaceholder = ex : /usr/local/bin/verapdf — vide = désactivé
 LemonFacturXInfo = Les factures PDF générées seront automatiquement converties au format Factur-X EN16931 (PDF/A-3 avec XML CrossIndustryInvoice embarqué). L'IBAN et le BIC sont lus depuis le compte bancaire sélectionné.
 LemonFacturXDiagTitle = Diagnostic des informations obligatoires
 LemonFacturXDiagResults = Vérification Factur-X EN16931 + règles BR-FR
@@ -59,13 +60,14 @@ LemonFacturXDiagFixLink = Corriger
 LemonFacturXDiagFixForceFont = Corriger automatiquement (pose « pdfahelvetica »)
 LemonFacturXForceFontSet = MAIN_PDF_FORCE_FONT définie à « pdfahelvetica » : les PDF générés embarquent désormais les polices (PDF/A-3). Réglage global, appliqué à tous les documents PDF de Dolibarr.
 LemonFacturXDiagAllOk = Toutes les informations obligatoires sont renseignées !
+LemonFacturXDiagNoBlocker = Aucun blocage : la conformité Factur-X est assurée. Il reste des points recommandés (en orange) que vous pouvez traiter pour un rendu optimal.
 
 LemonFacturXStrictMode = Mode de gestion des erreurs
 LemonFacturXStrictModeHint = Best-effort : si la génération Factur-X échoue, le PDF classique est fourni avec un warning. Strict : bloque la génération avec une erreur visible si le XML est invalide ou l'injection PDF échoue. Note : même en strict, le PDF classique déjà généré par Dolibarr reste sur le disque.
 LemonFacturXStrictModeBestEffort = Best-effort (défaut, non-bloquant)
 LemonFacturXStrictModeStrict = Strict (bloque si Factur-X échoue)
 LemonFacturXPhpCliPath = Chemin du binaire PHP CLI
-LemonFacturXPhpCliPathHint = Utilisé par le subprocess d'injection PDF. Laisser "php" si le binaire est dans le PATH, sinon chemin absolu (ex : /usr/bin/php8.2). Ne jamais utiliser PHP_BINARY en contexte FPM.
+LemonFacturXPhpCliPathHint = Laisser vide : le module détecte automatiquement le bon binaire PHP CLI. Renseigner un chemin uniquement pour forcer un binaire précis (setup exotique).
 LemonFacturXLegalNotes = Mentions légales obligatoires (BR-FR-05)
 LemonFacturXNotePMD = Pénalités de retard (PMD)
 LemonFacturXNotePMT = Indemnité de recouvrement (PMT)
@@ -149,13 +151,9 @@ LemonFacturXAboutCTA = Parlons de votre projet
 LemonFacturXAboutLocation = Clermont-Ferrand (63) — hello@hellolemon.fr
 
 # v3.1 — passerelle mentions BR-FR-05 vers le pied de facture (FACTURE_FREE_TEXT)
-LemonFacturXCopyNotesToFreeText = Recopier ces mentions dans le pied de facture Dolibarr
-LemonFacturXCopyNotesToFreeTextHelp = Ajoute ces trois mentions à la « Mention complémentaire sur les factures » (Configuration > Modules > Factures), imprimée en pied de chaque PDF — la facture lisible affiche alors la même chose que le XML embarqué. Le texte existant est conservé : seules les mentions absentes sont ajoutées. Enregistrez vos modifications avant de recopier.
 LemonFacturXCopyNotesDone = %s mention(s) ajoutée(s) au pied de facture Dolibarr (« Mention complémentaire sur les factures »)
-LemonFacturXCopyNotesAlready = Les mentions sont déjà toutes présentes dans le pied de facture Dolibarr
-LemonFacturXDiagFreeTextMissing = Pied de facture Dolibarr vide (« Mention complémentaire sur les factures ») — les mentions BR-FR-05 sont bien dans le XML, mais n'apparaissent pas en clair sur le PDF imprimé. Recommandé, non bloquant.
+LemonFacturXDiagFreeTextMissing = Pied de facture Dolibarr vide (« Mention complémentaire sur les factures ») — les mentions BR-FR-05 sont bien dans le XML, mais n'apparaissent pas en clair sur le PDF imprimé. Recommandé, non bloquant : activez « Recopier les mentions en pied » dans les Mentions légales.
 LemonFacturXDiagFreeTextOk = Pied de facture Dolibarr renseigné (mentions visibles sur le PDF)
-LemonFacturXDiagFixFreeText = Recopier les mentions (en un clic)
 
 # v3.4.0 — profil Chorus Pro (B2G) : 2e PDF + extrafields
 LemonFacturXEfChorus = Facture Chorus Pro (secteur public)
@@ -181,3 +179,13 @@ LemonFacturXChorusTabGenerateHint = Le PDF -CHORUS.pdf est (re)généré à la r
 LemonFacturXChorusEnabled = Fonctionnalités Chorus Pro (secteur public)
 LemonFacturXChorusEnabledHint = Affiche l'onglet Chorus Pro sur les factures et la génération du PDF Chorus. À activer uniquement si vous facturez le secteur public.
 LemonFacturXChorusSuggested = Cette facture semble destinée au secteur public (SIRET de l'État). Activez les fonctionnalités Chorus Pro dans la configuration du module si vous devez la déposer sur Chorus Pro.
+
+# Réorganisation du setup en blocs (v3.4.0)
+LemonFacturXSecBilling = Facturation
+LemonFacturXSecPublic = Secteur public (Chorus Pro)
+LemonFacturXSecValidation = Validation et conformité
+LemonFacturXSecTech = Technique (avancé)
+LemonFacturXNotesInFooter = Recopier les mentions en pied de facture
+LemonFacturXNotesInFooterHint = Si Oui, ajoute les mentions ci-dessus à « Mention complémentaire sur les factures » (pied de chaque PDF), sans toucher au texte existant. Appliqué à l'enregistrement.
+LemonFacturXPhpCliAutoPlaceholder = auto (détecté)
+LemonFacturXDiagPhpCliAuto = auto-détecté
