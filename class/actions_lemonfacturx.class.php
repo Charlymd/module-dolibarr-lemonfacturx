@@ -164,13 +164,20 @@ class ActionsLemonFacturX
 				$warnings[] = $veraWarning;
 			}
 
-			// PDF Factur-X au profil Chorus Pro (B2G), EN PLUS du PDF EN16931 standard,
-			// si la facture relève du secteur public. N'altère jamais le PDF principal.
-			if (lemonfacturx_is_chorus_invoice($invoice)) {
-				$chorus = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
-				if (!$chorus['ok']) {
-					$warnings[] = $chorus['msg'];
+			// Fonctionnalités Chorus Pro (opt-in via LEMONFACTURX_CHORUS_ENABLED).
+			if (getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED')) {
+				// Activé : génère le PDF Chorus EN PLUS du standard si la facture
+				// relève du public. N'altère jamais le PDF principal.
+				if (lemonfacturx_is_chorus_invoice($invoice)) {
+					$chorus = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
+					if (!$chorus['ok']) {
+						$warnings[] = $chorus['msg'];
+					}
 				}
+			} elseif (lemonfacturx_is_public_sector_siret($invoice)) {
+				// Désactivé mais acheteur public détecté : on informe (sans rien
+				// générer), pour suggérer d'activer Chorus Pro si besoin.
+				$warnings[] = lemonfacturx_trans('LemonFacturXChorusSuggested');
 			}
 
 			dol_syslog('LemonFacturX: PDF Factur-X généré pour '.$invoice->ref, LOG_INFO);
@@ -352,7 +359,9 @@ class ActionsLemonFacturX
 		}
 		if ($canWrite) {
 			$items[] = array('href' => $url.'&action=lemonfacturx_regenerate', 'label' => $langs->trans('LemonFacturXBtnRegenerate'));
-			$items[] = array('href' => $url.'&action=lemonfacturx_generatechorus', 'label' => $langs->trans('LemonFacturXBtnGenerateChorus'));
+			if (getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED')) {
+				$items[] = array('href' => $url.'&action=lemonfacturx_generatechorus', 'label' => $langs->trans('LemonFacturXBtnGenerateChorus'));
+			}
 		}
 
 		if (!empty($items)) {

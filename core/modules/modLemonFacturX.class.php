@@ -73,6 +73,7 @@ class modLemonFacturX extends DolibarrModules
 			array('LEMONFACTURX_NOTE_PMD', 'chaine', '', 'Mention légale pénalités de retard (BR-FR-05, default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_PMT', 'chaine', '', 'Mention légale indemnité de recouvrement (default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_AAB', 'chaine', '', 'Mention légale escompte anticipé (default appliqué si vide)', 1, 'current', 0),
+			array('LEMONFACTURX_CHORUS_ENABLED', 'int', '0', 'Activer les fonctionnalités Chorus Pro (onglet, menu, 2e PDF) — opt-in', 1, 'current', 0),
 		);
 
 		if (!isset($conf->lemonfacturx) || !isset($conf->lemonfacturx->enabled)) {
@@ -88,8 +89,10 @@ class modLemonFacturX extends DolibarrModules
 		// NB : le type d'onglet pour les factures est « invoice » (et non
 		// « facture ») — c'est ce que passe facture_prepare_head() à
 		// complete_head_from_modules(). Avec « facture » l'onglet n'apparaît jamais.
+		// La condition (5e champ) est évaluée au RUNTIME : l'onglet n'apparaît que
+		// si les fonctionnalités Chorus sont activées (opt-in, sans réactivation).
 		$this->tabs = array(
-			'invoice:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->lemonfacturx->enabled:/lemonfacturx/chorus_tab.php?id=__ID__',
+			'invoice:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->global->LEMONFACTURX_CHORUS_ENABLED:/lemonfacturx/chorus_tab.php?id=__ID__',
 		);
 	}
 

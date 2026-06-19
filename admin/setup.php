@@ -55,6 +55,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		['LEMONFACTURX_BT23_PROCESS', trim(GETPOST('LEMONFACTURX_BT23_PROCESS', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_STRICT_MODE',  GETPOSTINT('LEMONFACTURX_STRICT_MODE'),     'int'],
 		['LEMONFACTURX_BR_CHECK',     GETPOSTINT('LEMONFACTURX_BR_CHECK'),        'int'],
+		['LEMONFACTURX_CHORUS_ENABLED', GETPOSTINT('LEMONFACTURX_CHORUS_ENABLED'), 'int'],
 		['LEMONFACTURX_PHP_CLI_PATH', trim(GETPOST('LEMONFACTURX_PHP_CLI_PATH', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_VERAPDF_PATH', trim(GETPOST('LEMONFACTURX_VERAPDF_PATH', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_NOTE_PMD',     trim(GETPOST('LEMONFACTURX_NOTE_PMD', 'restricthtml')),    'chaine'],
@@ -239,6 +240,20 @@ $brCheck = getDolGlobalInt('LEMONFACTURX_BR_CHECK', 1);
 print '<select name="LEMONFACTURX_BR_CHECK" class="flat">';
 print '<option value="1"'.($brCheck ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
 print '<option value="0"'.(!$brCheck ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '</select>';
+print '</td>';
+print '</tr>';
+
+// Fonctionnalités Chorus Pro (secteur public) — opt-in
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonFacturXChorusEnabled");
+print '<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXChorusEnabledHint").'</span>';
+print '</td>';
+print '<td>';
+$chorusEnabled = getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED', 0);
+print '<select name="LEMONFACTURX_CHORUS_ENABLED" class="flat">';
+print '<option value="0"'.(!$chorusEnabled ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($chorusEnabled ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
 print '</select>';
 print '</td>';
 print '</tr>';

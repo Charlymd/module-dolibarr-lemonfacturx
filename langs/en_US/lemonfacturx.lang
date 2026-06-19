@@ -176,3 +176,8 @@ LemonFacturXChorusDetected = Chorus Pro profile detected for this invoice
 LemonFacturXEfCadre = Invoicing framework (Chorus, BT-23)
 LemonFacturXEfChorusHint = Force the Chorus PDF generation even without auto-detection
 LemonFacturXChorusTabGenerateHint = The -CHORUS.pdf is (re)generated when the invoice PDF is regenerated, or via the "Factur-X › Generate Chorus PDF" menu.
+
+# Chorus Pro opt-in toggle
+LemonFacturXChorusEnabled = Chorus Pro features (public sector)
+LemonFacturXChorusEnabledHint = Shows the Chorus Pro tab on invoices and the Chorus PDF generation. Enable only if you invoice the public sector.
+LemonFacturXChorusSuggested = This invoice seems addressed to the public sector (State SIRET). Enable the Chorus Pro features in the module setup if you need to submit it to Chorus Pro.

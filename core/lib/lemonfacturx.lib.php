@@ -1293,8 +1293,22 @@ function lemonfacturx_is_chorus_invoice($invoice)
 			return true;
 		}
 	}
-	// Filet auto : État central. Les collectivités/hôpitaux ont leur propre SIREN
-	// et doivent être marqués via la case à cocher — d'où le signal n°1 primaire.
+	// Filet auto : acheteur = secteur public détecté par le SIRET.
+	return lemonfacturx_is_public_sector_siret($invoice);
+}
+
+/**
+ * Détecte si l'acheteur est une entité publique d'après son SIRET (État central :
+ * SIRET commençant par 110002011). Sert au filet de détection automatique ET au
+ * message d'information affiché quand les fonctionnalités Chorus sont désactivées.
+ * NB : les collectivités/hôpitaux ont leur propre SIREN — non détectables ainsi,
+ * d'où la case à cocher manuelle dans l'onglet Chorus.
+ *
+ * @param Facture $invoice
+ * @return bool
+ */
+function lemonfacturx_is_public_sector_siret($invoice)
+{
 	$buyer = (is_object($invoice) && !empty($invoice->thirdparty)) ? $invoice->thirdparty : null;
 	if (is_object($buyer) && !empty($buyer->idprof2)) {
 		$siret = preg_replace('/[^0-9]/', '', $buyer->idprof2);
