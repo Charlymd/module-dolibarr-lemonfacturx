@@ -151,6 +151,12 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 	// spécifications externes PPF/PDP pour qualifier le cas d'usage (B1, S1...)
 	// et par Chorus Pro B2G (A1...). Omis si non configuré.
 	$bt23 = trim(getDolGlobalString('LEMONFACTURX_BT23_PROCESS', ''));
+	// Profil Chorus Pro : le cadre de facturation (BT-23) est choisi PAR FACTURE
+	// parmi les 24 valeurs AIFE (A1..A25), et il est obligatoire pour le dépôt B2G.
+	// A1 (dépôt fournisseur) par défaut si non renseigné.
+	if ($profile === 'choruspro') {
+		$bt23 = !empty($options['cadre']) ? $options['cadre'] : 'A1';
+	}
 	if ($bt23 !== '') {
 		$xml .= '  <ram:BusinessProcessSpecifiedDocumentContextParameter>'."\n";
 		$xml .= '    <ram:ID>'.lemonfacturx_xml_encode($bt23).'</ram:ID>'."\n";
@@ -1301,8 +1307,8 @@ function lemonfacturx_is_chorus_invoice($invoice)
 
 /**
  * Construit le tableau d'options pour générer le XML au profil Chorus Pro à
- * partir des extrafields de la facture (code service BT-10, n° engagement BT-13,
- * n° marché BT-12).
+ * partir des extrafields de la facture (cadre de facturation BT-23, code service
+ * BT-10, n° engagement BT-13, n° marché BT-12).
  *
  * @param Facture $invoice
  * @return array  options pour lemonfacturx_build_xml()
@@ -1312,9 +1318,47 @@ function lemonfacturx_chorus_options($invoice)
 	$ao = (is_object($invoice) && !empty($invoice->array_options)) ? $invoice->array_options : [];
 	return [
 		'profile'      => 'choruspro',
+		'cadre'        => trim((string) ($ao['options_lfxcadre'] ?? '')),
 		'service_code' => trim((string) ($ao['options_lfxservicecode'] ?? '')),
 		'engagement'   => trim((string) ($ao['options_lfxengagement'] ?? '')),
 		'marche'       => trim((string) ($ao['options_lfxmarche'] ?? '')),
+	];
+}
+
+/**
+ * Liste officielle des cadres de facturation Chorus Pro (BT-23), source AIFE
+ * « Annexe Processus de facturation » V4.00 §2.1. A1 = dépôt fournisseur (défaut
+ * B2G). Pas de A11 dans la nomenclature AIFE.
+ *
+ * @return array  code => libellé
+ */
+function lemonfacturx_chorus_frameworks()
+{
+	return [
+		'A1'  => 'A1 — Dépôt d\'une facture par un fournisseur',
+		'A2'  => 'A2 — Facture déjà payée (carte d\'achat)',
+		'A3'  => 'A3 — Mémoire de frais de justice',
+		'A4'  => 'A4 — Projet de décompte mensuel (travaux)',
+		'A5'  => 'A5 — État d\'acompte (travaux)',
+		'A6'  => 'A6 — Pièce de facturation travaux au service financier',
+		'A7'  => 'A7 — Projet de décompte final (travaux)',
+		'A8'  => 'A8 — Décompte général signé (travaux)',
+		'A9'  => 'A9 — Sous-traitant : demande de paiement',
+		'A10' => 'A10 — Sous-traitant : demande de paiement (marché de travaux)',
+		'A12' => 'A12 — Cotraitant : facture',
+		'A13' => 'A13 — Cotraitant : projet de décompte mensuel',
+		'A14' => 'A14 — Cotraitant : projet de décompte final',
+		'A15' => 'A15 — MOE : état d\'acompte',
+		'A16' => 'A16 — MOE : état d\'acompte validé',
+		'A17' => 'A17 — MOE : projet de décompte général',
+		'A18' => 'A18 — MOE : décompte général',
+		'A19' => 'A19 — MOA : état d\'acompte validé',
+		'A20' => 'A20 — MOA : décompte général',
+		'A21' => 'A21 — Demande de remboursement TIC',
+		'A22' => 'A22 — Fournisseur : projet de décompte général tacite',
+		'A23' => 'A23 — Fournisseur : décompte général définitif tacite',
+		'A24' => 'A24 — MOE : décompte général définitif tacite',
+		'A25' => 'A25 — MOA : décompte général définitif tacite',
 	];
 }
 

@@ -203,17 +203,24 @@ Un même XML ne peut pas satisfaire les deux. LemonFacturX résout ça **sans ja
 - Le **PDF de la facture reste le Factur-X standard EN16931** (profil PDP, SIREN) — c'est l'objet du module, toujours conforme.
 - Quand la facture relève du secteur public, le module génère **en plus** un second fichier **`{ref}-CHORUS.pdf`** dans la liste des documents, au profil Chorus Pro (SIRET-14 dans `SpecifiedLegalOrganization` + champs BT-10/12/13). Vous déposez celui-ci sur Chorus Pro, l'autre part sur votre PDP.
 
+**Onglet « Chorus Pro »** : les paramètres Chorus se règlent dans un onglet dédié sur la fiche facture (ils n'encombrent pas l'onglet « Données complémentaires »).
+
 **Déclenchement du PDF Chorus** (un seul signal suffit) :
-1. cocher **« Facture Chorus Pro (secteur public) »** sur la fiche facture (extrafield ajouté par le module) ;
+1. cocher **« Facture Chorus Pro »** dans l'onglet Chorus Pro de la facture ;
 2. renseigner un des champs Chorus (code service / n° engagement / n° marché) ;
 3. automatiquement si le SIRET de l'acheteur est celui de l'État central (`110002011…`).
 
-**Champs Chorus** (extrafields facture, repris dans le XML Chorus) :
+**Champs Chorus** (onglet Chorus Pro, repris dans le XML Chorus) :
 | Champ | Code EN16931 | Élément CII |
 |---|---|---|
+| Cadre de facturation (24 valeurs A1–A25) | BT-23 | `BusinessProcessSpecifiedDocumentContextParameter` |
 | Code service exécutant | BT-10 | `BuyerReference` |
 | N° d'engagement juridique | BT-13 | `BuyerOrderReferencedDocument` |
 | N° de marché | BT-12 | `ContractReferencedDocument` |
+
+Le **cadre de facturation** (BT-23) est obligatoire pour Chorus et se choisit par facture (A1 = dépôt fournisseur par défaut ; A9/A10 sous-traitance, A12+ cotraitance, A3 frais de justice, etc.).
+
+**Menu d'actions** : les actions Factur-X de la fiche facture sont regroupées dans un menu déroulant **« Factur-X ▾ »** (Vérifier / Régénérer / Générer le PDF Chorus).
 
 > ⚠️ Le PDF Chorus corrige le **format**. Le dépôt réussit seulement si l'émetteur et la structure publique destinataire sont **réellement raccordés sur Chorus Pro** (code service, n° d'engagement valides). Le XML ne crée pas le raccordement.
 >

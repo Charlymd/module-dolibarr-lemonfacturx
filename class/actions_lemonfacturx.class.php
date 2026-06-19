@@ -167,9 +167,9 @@ class ActionsLemonFacturX
 			// PDF Factur-X au profil Chorus Pro (B2G), EN PLUS du PDF EN16931 standard,
 			// si la facture relève du secteur public. N'altère jamais le PDF principal.
 			if (lemonfacturx_is_chorus_invoice($invoice)) {
-				$chorusNote = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
-				if ($chorusNote !== null) {
-					$warnings[] = $chorusNote;
+				$chorus = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
+				if (!$chorus['ok']) {
+					$warnings[] = $chorus['msg'];
 				}
 			}
 
@@ -198,7 +198,7 @@ class ActionsLemonFacturX
 	 * @param Societe $mysoc
 	 * @param string  $modulePath
 	 * @param string  $phpBin      Binaire PHP CLI déjà résolu
-	 * @return string|null
+	 * @return array{ok:bool,msg:string}
 	 */
 	protected function generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath, $phpBin)
 	{
@@ -212,14 +212,14 @@ class ActionsLemonFacturX
 		$xsdError = $this->validateXml($chorusXml, $modulePath);
 		if ($xsdError !== null) {
 			dol_syslog('LemonFacturX Chorus: XML invalide pour '.$invoice->ref.' : '.$xsdError, LOG_ERR);
-			return lemonfacturx_trans('LemonFacturXChorusErr');
+			return array('ok' => false, 'msg' => lemonfacturx_trans('LemonFacturXChorusErr'));
 		}
 
 		// Copie {ref}-CHORUS.pdf dans le même dossier que le PDF principal.
 		$chorusPdf = preg_replace('/\.pdf$/i', '', $mainPdf).'-CHORUS.pdf';
 		if (!@copy($mainPdf, $chorusPdf)) {
 			dol_syslog('LemonFacturX Chorus: copie PDF impossible vers '.$chorusPdf, LOG_ERR);
-			return lemonfacturx_trans('LemonFacturXChorusErr');
+			return array('ok' => false, 'msg' => lemonfacturx_trans('LemonFacturXChorusErr'));
 		}
 
 		$xmlTempDir = DOL_DATA_ROOT.'/facturx/temp';
@@ -229,7 +229,7 @@ class ActionsLemonFacturX
 			if ($tmp !== false) { @unlink($tmp); }
 			@unlink($chorusPdf);
 			dol_syslog('LemonFacturX Chorus: écriture XML temp impossible', LOG_ERR);
-			return lemonfacturx_trans('LemonFacturXChorusErr');
+			return array('ok' => false, 'msg' => lemonfacturx_trans('LemonFacturXChorusErr'));
 		}
 
 		try {
@@ -244,14 +244,70 @@ class ActionsLemonFacturX
 			if ($rc !== 0) {
 				@unlink($chorusPdf);
 				dol_syslog('LemonFacturX Chorus: injection KO : '.dol_trunc(implode(' ', $output), 300), LOG_ERR);
-				return lemonfacturx_trans('LemonFacturXChorusErr');
+				return array('ok' => false, 'msg' => lemonfacturx_trans('LemonFacturXChorusErr'));
 			}
 		} finally {
 			@unlink($tmp);
 		}
 
 		dol_syslog('LemonFacturX: PDF Chorus généré pour '.$invoice->ref.' ('.basename($chorusPdf).')', LOG_INFO);
-		return lemonfacturx_trans('LemonFacturXChorusGenerated', basename($chorusPdf));
+		return array('ok' => true, 'msg' => lemonfacturx_trans('LemonFacturXChorusGenerated', basename($chorusPdf)));
+	}
+
+	/**
+	 * Génère le PDF Chorus à la demande (action du menu déroulant), depuis le
+	 * PDF principal existant. Affiche le résultat en message.
+	 */
+	protected function generateChorusOnDemand($invoice)
+	{
+		global $mysoc, $langs;
+
+		$modulePath = dirname(__DIR__);
+		require_once $modulePath.'/core/lib/lemonfacturx.lib.php';
+		require_once $modulePath.'/core/lib/lemonfacturx_rules.php';
+
+		if (empty($invoice->thirdparty) || !is_object($invoice->thirdparty)) {
+			$invoice->fetch_thirdparty();
+		}
+		if (empty($invoice->lines)) {
+			$invoice->fetch_lines();
+		}
+
+		$mainPdf = $this->getInvoicePdfPath($invoice);
+		if ($mainPdf === null || !file_exists($mainPdf)) {
+			setEventMessages($langs->trans('LemonFacturXMsgNoPdf'), null, 'warnings');
+			return;
+		}
+		$phpBin = $this->resolvePhpBinary(0);
+		if ($phpBin === null) {
+			return; // message déjà émis par resolvePhpBinary
+		}
+
+		$res = $this->generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath, $phpBin);
+		setEventMessages($res['msg'], null, $res['ok'] ? 'mesgs' : 'warnings');
+	}
+
+	/**
+	 * Rend un menu déroulant « bouton + liste » autonome (élément <details>,
+	 * sans dépendance JS framework). $items = [['href'=>..,'label'=>..], ...].
+	 *
+	 * @param string $label
+	 * @param array  $items
+	 * @return string
+	 */
+	protected function renderDropdown($label, array $items)
+	{
+		$html  = '<div class="inline-block valignmiddle lfx-dd-wrap" style="position:relative;">';
+		$html .= '<details class="lfx-dropdown">';
+		$html .= '<summary class="butAction" style="list-style:none;cursor:pointer;">'.dol_escape_htmltag($label).' <span style="font-size:.75em;">&#9662;</span></summary>';
+		$html .= '<div class="lfx-dropdown-menu" style="position:absolute;right:0;top:100%;z-index:1000;background:#fff;border:1px solid #bbb;border-radius:5px;box-shadow:0 3px 12px rgba(0,0,0,.18);min-width:215px;margin-top:3px;overflow:hidden;">';
+		foreach ($items as $it) {
+			$html .= '<a href="'.dol_escape_htmltag($it['href']).'" style="display:block;padding:9px 16px;white-space:nowrap;color:#444;text-decoration:none;border-bottom:1px solid #f1f1f1;">'.dol_escape_htmltag($it['label']).'</a>';
+		}
+		$html .= '</div></details>';
+		$html .= '<style>.lfx-dropdown summary::-webkit-details-marker{display:none;}.lfx-dropdown-menu a:hover{background:#f5f5f5;}.lfx-dropdown-menu a:last-child{border-bottom:none;}</style>';
+		$html .= '</div>';
+		return $html;
 	}
 
 	/**
@@ -280,12 +336,27 @@ class ActionsLemonFacturX
 			$langs->loadLangs(['lemonfacturx@lemonfacturx']);
 		}
 
-		$url = $_SERVER['PHP_SELF'].'?facid='.((int) $object->id).'&token='.newToken();
-		if ($this->userCanRead($user)) {
-			print '<a class="butAction" href="'.dol_escape_htmltag($url.'&action=lemonfacturx_verify').'">'.$langs->trans('LemonFacturXBtnVerify').'</a>';
+		// Menu déroulant unique « Factur-X ▾ » regroupant les actions du module
+		// (et l'envoi via SUPER PDP si ce module compagnon est actif).
+		$id = (int) $object->id;
+		$url = $_SERVER['PHP_SELF'].'?facid='.$id.'&token='.newToken();
+		$canRead = $this->userCanRead($user);
+		$canWrite = $this->userCanWrite($user);
+
+		// Le menu ne porte que les actions de CE module. L'envoi via SUPER PDP
+		// reste géré par son propre module (bouton intelligent, état B2C/déjà
+		// transmise...) : pas de couplage inverse FacturX → SuperPDP.
+		$items = array();
+		if ($canRead) {
+			$items[] = array('href' => $url.'&action=lemonfacturx_verify', 'label' => $langs->trans('LemonFacturXBtnVerify'));
 		}
-		if ($this->userCanWrite($user)) {
-			print '<a class="butAction" href="'.dol_escape_htmltag($url.'&action=lemonfacturx_regenerate').'">'.$langs->trans('LemonFacturXBtnRegenerate').'</a>';
+		if ($canWrite) {
+			$items[] = array('href' => $url.'&action=lemonfacturx_regenerate', 'label' => $langs->trans('LemonFacturXBtnRegenerate'));
+			$items[] = array('href' => $url.'&action=lemonfacturx_generatechorus', 'label' => $langs->trans('LemonFacturXBtnGenerateChorus'));
+		}
+
+		if (!empty($items)) {
+			print $this->renderDropdown($langs->trans('LemonFacturXMenuLabel'), $items);
 		}
 
 		return 0;
@@ -306,7 +377,7 @@ class ActionsLemonFacturX
 		if (!in_array('invoicecard', $contexts, true)) {
 			return 0;
 		}
-		if (!in_array($action, ['lemonfacturx_verify', 'lemonfacturx_regenerate'], true)) {
+		if (!in_array($action, ['lemonfacturx_verify', 'lemonfacturx_regenerate', 'lemonfacturx_generatechorus'], true)) {
 			return 0;
 		}
 		if (!is_object($object) || !($object instanceof Facture) || empty($object->id)) {
@@ -347,6 +418,16 @@ class ActionsLemonFacturX
 				setEventMessages($langs->trans('LemonFacturXMsgRegenerateFailed').' : '.$object->error, null, 'errors');
 			}
 			// Les messages de succès/avertissement sont émis par afterPDFCreation
+			$action = '';
+			return 0;
+		}
+
+		if ($action === 'lemonfacturx_generatechorus') {
+			if (!$this->userCanWrite($user)) {
+				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+				return 0;
+			}
+			$this->generateChorusOnDemand($object);
 			$action = '';
 			return 0;
 		}

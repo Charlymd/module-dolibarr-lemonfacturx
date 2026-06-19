@@ -82,6 +82,12 @@ class modLemonFacturX extends DolibarrModules
 
 		$this->rights = array();
 		$this->menu = array();
+
+		// Onglet dédié « Chorus Pro » sur la fiche facture (regroupe les champs
+		// Chorus, masqués de l'affichage extrafields standard via list=0).
+		$this->tabs = array(
+			'facture:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->lemonfacturx->enabled:/lemonfacturx/chorus_tab.php?id=__ID__',
+		);
 	}
 
 	/**
@@ -118,27 +124,34 @@ class modLemonFacturX extends DolibarrModules
 	private function createChorusExtraFields()
 	{
 		require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+		require_once dol_buildpath('/lemonfacturx/core/lib/lemonfacturx.lib.php');
 
 		$extrafields = new ExtraFields($this->db);
 		$extrafields->fetch_name_optionals_label('facture');
 
-		// attrname, label (clé de trad), type, taille, position
+		$cadres = lemonfacturx_chorus_frameworks();
+
+		// attrname, label (clé de trad), type, taille (varchar) OU param (select), position
 		$defs = array(
-			array('lfxchorus',     'LemonFacturXEfChorus',      'boolean', '',    1010),
-			array('lfxservicecode','LemonFacturXEfServiceCode', 'varchar', '255', 1011),
-			array('lfxengagement', 'LemonFacturXEfEngagement',  'varchar', '255', 1012),
-			array('lfxmarche',     'LemonFacturXEfMarche',      'varchar', '255', 1013),
+			array('lfxchorus',     'LemonFacturXEfChorus',      'boolean', '',                          1010),
+			array('lfxcadre',      'LemonFacturXEfCadre',       'select',  array('options' => $cadres), 1011),
+			array('lfxservicecode','LemonFacturXEfServiceCode', 'varchar', '255',                       1012),
+			array('lfxengagement', 'LemonFacturXEfEngagement',  'varchar', '255',                       1013),
+			array('lfxmarche',     'LemonFacturXEfMarche',      'varchar', '255',                       1014),
 		);
 		foreach ($defs as $d) {
 			if (!empty($extrafields->attributes['facture']['label'][$d[0]])) {
 				continue; // déjà présent
 			}
+			$size  = is_array($d[3]) ? '' : $d[3];   // taille (chaîne) pour varchar
+			$param = is_array($d[3]) ? $d[3] : '';   // tableau d'options pour select
 			// Signature : (attrname, label, type, pos, size, elementtype, unique,
-			// required, default, param, alwayseditable, perms, list, help, computed,
-			// entity, langfile, enabled). $param et $help sont des CHAÎNES.
+			// required, default, param, alwayseditable, perms, list, ...). list='0'
+			// = masqué de l'affichage standard : ces champs ne s'éditent QUE dans
+			// l'onglet « Chorus Pro » dédié.
 			$extrafields->addExtraField(
-				$d[0], $d[1], $d[2], $d[4], $d[3], 'facture',
-				0, 0, '', '', 1, '', '1', '', '', '',
+				$d[0], $d[1], $d[2], $d[4], $size, 'facture',
+				0, 0, '', $param, 1, '', '0', '', '', '',
 				'lemonfacturx@lemonfacturx', '$conf->lemonfacturx->enabled'
 			);
 		}

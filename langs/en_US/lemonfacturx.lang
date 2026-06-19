@@ -164,3 +164,15 @@ LemonFacturXEfEngagement = Legal commitment number (Chorus, BT-13)
 LemonFacturXEfMarche = Contract/market number (Chorus, BT-12)
 LemonFacturXChorusGenerated = Chorus Pro PDF generated alongside: %s
 LemonFacturXChorusErr = The Chorus Pro PDF could not be generated (the standard Factur-X PDF remains valid)
+
+# Factur-X dropdown menu (v3.4.1)
+LemonFacturXMenuLabel = Factur-X
+LemonFacturXBtnGenerateChorus = Generate Chorus PDF
+
+# Chorus Pro tab (v3.4.0)
+LemonFacturXChorusTab = Chorus Pro
+LemonFacturXChorusTabHelp = Public-sector profile settings. When this invoice falls under Chorus Pro, a second "{ref}-CHORUS.pdf" file is generated in the format Chorus expects (SIRET in the legal id + references below), in addition to the standard Factur-X.
+LemonFacturXChorusDetected = Chorus Pro profile detected for this invoice
+LemonFacturXEfCadre = Invoicing framework (Chorus, BT-23)
+LemonFacturXEfChorusHint = Force the Chorus PDF generation even without auto-detection
+LemonFacturXChorusTabGenerateHint = The -CHORUS.pdf is (re)generated when the invoice PDF is regenerated, or via the "Factur-X › Generate Chorus PDF" menu.
