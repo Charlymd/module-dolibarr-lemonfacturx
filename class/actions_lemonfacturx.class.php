@@ -164,6 +164,15 @@ class ActionsLemonFacturX
 				$warnings[] = $veraWarning;
 			}
 
+			// PDF Factur-X au profil Chorus Pro (B2G), EN PLUS du PDF EN16931 standard,
+			// si la facture relève du secteur public. N'altère jamais le PDF principal.
+			if (lemonfacturx_is_chorus_invoice($invoice)) {
+				$chorusNote = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
+				if ($chorusNote !== null) {
+					$warnings[] = $chorusNote;
+				}
+			}
+
 			dol_syslog('LemonFacturX: PDF Factur-X généré pour '.$invoice->ref, LOG_INFO);
 			$this->reportSuccess($invoice->ref, $warnings);
 			return 0;
@@ -173,6 +182,76 @@ class ActionsLemonFacturX
 				$this->xmlTmpFile = null;
 			}
 		}
+	}
+
+	/**
+	 * Génère un SECOND PDF Factur-X au profil Chorus Pro (B2G) à côté du PDF
+	 * principal : copie `{ref}-CHORUS.pdf` dans le même répertoire documents, avec
+	 * un XML où l'identifiant légal porte le SIRET-14 (clé de routage Chorus Pro)
+	 * et les champs BT-10/12/13 (code service, marché, engagement).
+	 *
+	 * Non bloquant : un échec ici ne touche jamais le PDF EN16931 standard déjà
+	 * généré. Retourne un message d'avertissement à afficher, ou null si OK.
+	 *
+	 * @param Facture $invoice
+	 * @param string  $mainPdf     Chemin du PDF principal (source de la copie)
+	 * @param Societe $mysoc
+	 * @param string  $modulePath
+	 * @param string  $phpBin      Binaire PHP CLI déjà résolu
+	 * @return string|null
+	 */
+	protected function generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath, $phpBin)
+	{
+		$options = lemonfacturx_chorus_options($invoice);
+
+		$cw = [];
+		$chorusXml = lemonfacturx_build_xml($invoice, $mysoc, $cw, $options);
+
+		// Le PDF Chorus doit être aussi valide que le principal : on bloque la
+		// copie si le XML profil Chorus ne passe pas le XSD.
+		$xsdError = $this->validateXml($chorusXml, $modulePath);
+		if ($xsdError !== null) {
+			dol_syslog('LemonFacturX Chorus: XML invalide pour '.$invoice->ref.' : '.$xsdError, LOG_ERR);
+			return lemonfacturx_trans('LemonFacturXChorusErr');
+		}
+
+		// Copie {ref}-CHORUS.pdf dans le même dossier que le PDF principal.
+		$chorusPdf = preg_replace('/\.pdf$/i', '', $mainPdf).'-CHORUS.pdf';
+		if (!@copy($mainPdf, $chorusPdf)) {
+			dol_syslog('LemonFacturX Chorus: copie PDF impossible vers '.$chorusPdf, LOG_ERR);
+			return lemonfacturx_trans('LemonFacturXChorusErr');
+		}
+
+		$xmlTempDir = DOL_DATA_ROOT.'/facturx/temp';
+		dol_mkdir($xmlTempDir);
+		$tmp = tempnam($xmlTempDir, 'facturxchorus_');
+		if ($tmp === false || file_put_contents($tmp, $chorusXml) === false) {
+			if ($tmp !== false) { @unlink($tmp); }
+			@unlink($chorusPdf);
+			dol_syslog('LemonFacturX Chorus: écriture XML temp impossible', LOG_ERR);
+			return lemonfacturx_trans('LemonFacturXChorusErr');
+		}
+
+		try {
+			$cmd  = escapeshellarg($phpBin);
+			$cmd .= ' '.escapeshellarg($modulePath.'/scripts/inject_facturx.php');
+			$cmd .= ' '.escapeshellarg($chorusPdf);
+			$cmd .= ' '.escapeshellarg($tmp);
+			$cmd .= ' 2>&1';
+			$output = [];
+			$rc = 0;
+			exec($cmd, $output, $rc);
+			if ($rc !== 0) {
+				@unlink($chorusPdf);
+				dol_syslog('LemonFacturX Chorus: injection KO : '.dol_trunc(implode(' ', $output), 300), LOG_ERR);
+				return lemonfacturx_trans('LemonFacturXChorusErr');
+			}
+		} finally {
+			@unlink($tmp);
+		}
+
+		dol_syslog('LemonFacturX: PDF Chorus généré pour '.$invoice->ref.' ('.basename($chorusPdf).')', LOG_INFO);
+		return lemonfacturx_trans('LemonFacturXChorusGenerated', basename($chorusPdf));
 	}
 
 	/**

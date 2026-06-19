@@ -192,6 +192,33 @@ Les quantités de ligne utilisent le code UN/ECE Rec 20 correspondant à l'unit�
 
 Si l'unité n'est pas mappée ou si `fk_unit` n'est pas renseigné, le code `C62` (pièce) est utilisé en fallback. Les quantités sont émises avec jusqu'à 4 décimales.
 
+### Double circuit B2B (PDP) et B2G (Chorus Pro) — depuis 3.4.0
+
+La réforme française repose sur **deux réseaux distincts et permanents** qui exigent des choses opposées dans le même champ `SpecifiedLegalOrganization/ID` :
+- **PDP / B2B** (réseau des Plateformes Agréées) : **SIREN** (9 chiffres), conforme EN16931 / règle BR-FR-10 ;
+- **Chorus Pro / B2G** (secteur public) : **SIRET** (14 chiffres), clé de routage de son annuaire.
+
+Un même XML ne peut pas satisfaire les deux. LemonFacturX résout ça **sans jamais dégrader le PDF principal** :
+
+- Le **PDF de la facture reste le Factur-X standard EN16931** (profil PDP, SIREN) — c'est l'objet du module, toujours conforme.
+- Quand la facture relève du secteur public, le module génère **en plus** un second fichier **`{ref}-CHORUS.pdf`** dans la liste des documents, au profil Chorus Pro (SIRET-14 dans `SpecifiedLegalOrganization` + champs BT-10/12/13). Vous déposez celui-ci sur Chorus Pro, l'autre part sur votre PDP.
+
+**Déclenchement du PDF Chorus** (un seul signal suffit) :
+1. cocher **« Facture Chorus Pro (secteur public) »** sur la fiche facture (extrafield ajouté par le module) ;
+2. renseigner un des champs Chorus (code service / n° engagement / n° marché) ;
+3. automatiquement si le SIRET de l'acheteur est celui de l'État central (`110002011…`).
+
+**Champs Chorus** (extrafields facture, repris dans le XML Chorus) :
+| Champ | Code EN16931 | Élément CII |
+|---|---|---|
+| Code service exécutant | BT-10 | `BuyerReference` |
+| N° d'engagement juridique | BT-13 | `BuyerOrderReferencedDocument` |
+| N° de marché | BT-12 | `ContractReferencedDocument` |
+
+> ⚠️ Le PDF Chorus corrige le **format**. Le dépôt réussit seulement si l'émetteur et la structure publique destinataire sont **réellement raccordés sur Chorus Pro** (code service, n° d'engagement valides). Le XML ne crée pas le raccordement.
+>
+> **Mise à jour depuis < 3.4.0** : désactiver puis réactiver le module pour créer les extrafields Chorus sur les factures (aucune donnée supprimée).
+
 ### Mentions légales FR (BR-FR-05)
 
 Le XML inclut automatiquement les notes obligatoires :

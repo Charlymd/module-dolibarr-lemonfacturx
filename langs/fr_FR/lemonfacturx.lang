@@ -156,3 +156,11 @@ LemonFacturXCopyNotesAlready = Les mentions sont déjà toutes présentes dans l
 LemonFacturXDiagFreeTextMissing = Pied de facture Dolibarr vide (« Mention complémentaire sur les factures ») — les mentions BR-FR-05 sont bien dans le XML, mais n'apparaissent pas en clair sur le PDF imprimé. Recommandé, non bloquant.
 LemonFacturXDiagFreeTextOk = Pied de facture Dolibarr renseigné (mentions visibles sur le PDF)
 LemonFacturXDiagFixFreeText = Recopier les mentions (en un clic)
+
+# v3.4.0 — profil Chorus Pro (B2G) : 2e PDF + extrafields
+LemonFacturXEfChorus = Facture Chorus Pro (secteur public)
+LemonFacturXEfServiceCode = Code service exécutant (Chorus, BT-10)
+LemonFacturXEfEngagement = N° d'engagement juridique (Chorus, BT-13)
+LemonFacturXEfMarche = N° de marché (Chorus, BT-12)
+LemonFacturXChorusGenerated = PDF Chorus Pro généré en complément : %s
+LemonFacturXChorusErr = Le PDF Chorus Pro n'a pas pu être généré (le PDF Factur-X standard reste valide)

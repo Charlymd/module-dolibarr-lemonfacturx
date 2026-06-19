@@ -144,6 +144,24 @@ $xpf = lfx_xpath(lemonfacturx_build_xml($inv, $socFb, $wf));
 lfx_assert_eq('909458306', lfx_xp_str($xpf, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID'), 'BT-30 SIREN dérivé du SIRET quand idprof1 absent');
 echo "U01b OK\n";
 
+// U01c : profil Chorus Pro — SIRET-14 dans SpecifiedLegalOrganization (0009) + BT-10/12/13
+$wc = [];
+$xmlChorus = lemonfacturx_build_xml($inv, $mysoc, $wc, [
+	'profile'      => 'choruspro',
+	'service_code' => 'SVC12345678',
+	'engagement'   => 'EJ2026-42',
+	'marche'       => 'MARCHE-7',
+]);
+lfx_std_validate($xmlChorus, $xsdPath);
+$xpc = lfx_xpath($xmlChorus);
+lfx_assert_eq('0009', lfx_xp_str($xpc, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID/@schemeID'), 'Chorus: BT-30 schemeID SIRET (0009)');
+lfx_assert_eq('90945830600012', lfx_xp_str($xpc, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID'), 'Chorus: BT-30 SIRET-14 vendeur');
+lfx_assert_eq(0, $xpc->query('//ram:SellerTradeParty/ram:ID')->length, 'Chorus: pas de ram:ID BT-29 séparé (SIRET uniquement en SpecifiedLegalOrganization)');
+lfx_assert_eq('SVC12345678', lfx_xp_str($xpc, '//ram:ApplicableHeaderTradeAgreement/ram:BuyerReference'), 'Chorus: BT-10 code service');
+lfx_assert_eq('EJ2026-42', lfx_xp_str($xpc, '//ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID'), 'Chorus: BT-13 n° engagement');
+lfx_assert_eq('MARCHE-7', lfx_xp_str($xpc, '//ram:ContractReferencedDocument/ram:IssuerAssignedID'), 'Chorus: BT-12 n° marché');
+echo "U01c OK\n";
+
 // ---------------------------------------------------------------------------
 $currentTest = 'U02 avoir 381 montants positifs + BG-3';
 lfx_reset([], ['iban' => 'FR7630006000011234567890189', 'bic' => 'AGRIFRPP'], [

@@ -26,7 +26,7 @@ class modLemonFacturX extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Génération automatique de factures Factur-X EN16931";
 		$this->descriptionlong = "Injecte un XML CrossIndustryInvoice EN16931 dans chaque PDF facture client généré, pour conformité Factur-X.";
-		$this->version = '3.2.1';
+		$this->version = '3.4.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -82,5 +82,65 @@ class modLemonFacturX extends DolibarrModules
 
 		$this->rights = array();
 		$this->menu = array();
+	}
+
+	/**
+	 * Activation du module : crée les extrafields Chorus Pro sur les factures.
+	 *
+	 * @param string $options Options d'activation
+	 * @return int 1 si OK, 0 si KO
+	 */
+	public function init($options = '')
+	{
+		$result = $this->_init(array(), $options);
+		$this->createChorusExtraFields();
+		return $result;
+	}
+
+	/**
+	 * Désactivation : ne supprime PAS les extrafields (remove() est appelé à
+	 * chaque désactivation, pas qu'à la désinstallation — on ne touche jamais
+	 * aux données saisies par l'utilisateur).
+	 *
+	 * @param string $options Options de désactivation
+	 * @return int 1 si OK, 0 si KO
+	 */
+	public function remove($options = '')
+	{
+		return $this->_remove(array(), $options);
+	}
+
+	/**
+	 * Crée (si absents) les extrafields de la fiche facture pour le profil
+	 * Chorus Pro : case à cocher de forçage + code service (BT-10), n° engagement
+	 * (BT-13), n° marché (BT-12). Idempotent et non bloquant.
+	 */
+	private function createChorusExtraFields()
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+
+		$extrafields = new ExtraFields($this->db);
+		$extrafields->fetch_name_optionals_label('facture');
+
+		// attrname, label (clé de trad), type, taille, position
+		$defs = array(
+			array('lfxchorus',     'LemonFacturXEfChorus',      'boolean', '',    1010),
+			array('lfxservicecode','LemonFacturXEfServiceCode', 'varchar', '255', 1011),
+			array('lfxengagement', 'LemonFacturXEfEngagement',  'varchar', '255', 1012),
+			array('lfxmarche',     'LemonFacturXEfMarche',      'varchar', '255', 1013),
+		);
+		foreach ($defs as $d) {
+			if (!empty($extrafields->attributes['facture']['label'][$d[0]])) {
+				continue; // déjà présent
+			}
+			// Signature : (attrname, label, type, pos, size, elementtype, unique,
+			// required, default, param, alwayseditable, perms, list, help, computed,
+			// entity, langfile, enabled). $param et $help sont des CHAÎNES.
+			$extrafields->addExtraField(
+				$d[0], $d[1], $d[2], $d[4], $d[3], 'facture',
+				0, 0, '', '', 1, '', '1', '', '', '',
+				'lemonfacturx@lemonfacturx', '$conf->lemonfacturx->enabled'
+			);
+		}
 	}
 }

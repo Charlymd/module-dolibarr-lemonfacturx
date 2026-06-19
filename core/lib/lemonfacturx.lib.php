@@ -94,9 +94,14 @@ function lemonfacturx_check_supported($invoice)
  * @param array   $buildWarnings  (sortie) Avertissements non bloquants détectés pendant la génération
  * @return string                 XML CrossIndustryInvoice
  */
-function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [])
+function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options = [])
 {
 	global $conf;
+
+	// Profil de génération. 'pdp' (défaut) = norme EN16931/PDP (SIREN en BT-30).
+	// 'choruspro' = profil B2G Chorus Pro (SIRET en BT-30 + champs BT-10/12/13).
+	$profile = (isset($options['profile']) && $options['profile'] === 'choruspro') ? 'choruspro' : 'pdp';
+	$legalIdMode = ($profile === 'choruspro') ? 'siret' : 'siren';
 
 	$typeCode = lemonfacturx_resolve_document_type($invoice, $buildWarnings);
 	$isCreditNote = ($typeCode === '381');
@@ -176,19 +181,30 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [])
 	}
 
 	$xml .= '  <ram:ApplicableHeaderTradeAgreement>'."\n";
-	// BT-10 : référence acheteur (ref_client Dolibarr). Porte le code service /
-	// n° d'engagement attendu par Chorus Pro et de nombreux grands comptes.
-	if (!empty($invoice->ref_client)) {
-		$xml .= '    <ram:BuyerReference>'.lemonfacturx_xml_encode($invoice->ref_client).'</ram:BuyerReference>'."\n";
+	// BT-10 : référence acheteur / code service. En profil Chorus, le code service
+	// exécutant explicite (options['service_code']) prime sur ref_client.
+	$buyerRef = ($profile === 'choruspro' && !empty($options['service_code']))
+		? $options['service_code']
+		: (!empty($invoice->ref_client) ? $invoice->ref_client : '');
+	if ($buyerRef !== '') {
+		$xml .= '    <ram:BuyerReference>'.lemonfacturx_xml_encode($buyerRef).'</ram:BuyerReference>'."\n";
 	}
-	$xml .= lemonfacturx_build_trade_party_xml('Seller', $mysoc, $mysoc->email ?? '');
-	$xml .= lemonfacturx_build_trade_party_xml('Buyer', $buyer, lemonfacturx_get_buyer_email($buyer, $invoice->db));
-	// BT-13 : référence de la commande liée (1re commande source dans element_element)
-	$orderRef = lemonfacturx_get_linked_order_ref($invoice);
+	$xml .= lemonfacturx_build_trade_party_xml('Seller', $mysoc, $mysoc->email ?? '', $legalIdMode);
+	$xml .= lemonfacturx_build_trade_party_xml('Buyer', $buyer, lemonfacturx_get_buyer_email($buyer, $invoice->db), $legalIdMode);
+	// BT-13 : n° d'engagement juridique (Chorus) sinon référence de la commande liée.
+	$orderRef = ($profile === 'choruspro' && !empty($options['engagement']))
+		? $options['engagement']
+		: lemonfacturx_get_linked_order_ref($invoice);
 	if ($orderRef !== '') {
 		$xml .= '    <ram:BuyerOrderReferencedDocument>'."\n";
 		$xml .= '      <ram:IssuerAssignedID>'.lemonfacturx_xml_encode($orderRef).'</ram:IssuerAssignedID>'."\n";
 		$xml .= '    </ram:BuyerOrderReferencedDocument>'."\n";
+	}
+	// BT-12 : référence du marché (Chorus Pro). Séquence XSD : après BuyerOrder.
+	if ($profile === 'choruspro' && !empty($options['marche'])) {
+		$xml .= '    <ram:ContractReferencedDocument>'."\n";
+		$xml .= '      <ram:IssuerAssignedID>'.lemonfacturx_xml_encode($options['marche']).'</ram:IssuerAssignedID>'."\n";
+		$xml .= '    </ram:ContractReferencedDocument>'."\n";
 	}
 	$xml .= '  </ram:ApplicableHeaderTradeAgreement>'."\n";
 
@@ -829,7 +845,7 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
  * @param object $party  Société émettrice (mysoc) ou Societe acheteur
  * @param string $email  Email à publier dans le bloc URI (BT-49 / BT-34)
  */
-function lemonfacturx_build_trade_party_xml($role, $party, $email)
+function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode = 'siren')
 {
 	$tag = ($role === 'Seller') ? 'SellerTradeParty' : 'BuyerTradeParty';
 	$country = !empty($party->country_code) ? $party->country_code : 'FR';
@@ -841,23 +857,30 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email)
 	// EN16931 CII : deux champs DISTINCTS, chacun son identifiant (ISO 6523).
 	//  - BT-29/BT-46  ram:ID                        = SIRET (14 chiffres), schemeID 0009  → l'établissement
 	//  - BT-30/BT-47  SpecifiedLegalOrganization/ID = SIREN (9 chiffres),  schemeID 0002  → l'entité légale
-	// La règle BR-FR-10 du Schematron officiel Factur-X exige le SIREN (exactement
-	// 9 chiffres) dans SpecifiedLegalOrganization. C'est la norme ; toute plateforme
-	// (PA/PDP, Chorus Pro...) doit la respecter, on ne s'en écarte pas.
 	// L'ordre suit la séquence XSD du TradePartyType : ID, Name, SpecifiedLegalOrganization.
-	//
 	// Source SIREN = idprof1 (à défaut dérivé du SIRET) ; source SIRET = idprof2.
 	$isFR = (strtoupper($country) === 'FR');
 	$siren = $isFR ? lemonfacturx_party_siren($party) : '';
 	$siretDigits = $isFR ? preg_replace('/[^0-9]/', '', $party->idprof2 ?? '') : '';
 	$siret14 = (strlen($siretDigits) === 14) ? $siretDigits : '';
 
+	// Deux profils selon la destination (cf. réforme FR : deux réseaux distincts).
+	//  - 'siren' (défaut, PDP/B2B) : SIRET en BT-29 (ram:ID/0009) + SIREN en BT-30
+	//    (SpecifiedLegalOrganization/0002). Conforme norme EN16931 / règle BR-FR-10.
+	//  - 'siret' (Chorus Pro/B2G) : SIRET-14 en BT-30 (SpecifiedLegalOrganization/0009),
+	//    qui est la clé de routage de l'annuaire Chorus Pro (il ne lit QUE ce champ).
+	$chorus = ($legalIdMode === 'siret');
+
 	$xml  = '    <ram:'.$tag.'>'."\n";
-	if (!empty($siret14)) {
+	if (!$chorus && !empty($siret14)) {
 		$xml .= '      <ram:ID schemeID="0009">'.lemonfacturx_xml_encode($siret14).'</ram:ID>'."\n";
 	}
 	$xml .= '      <ram:Name>'.lemonfacturx_xml_encode($party->name ?? '').'</ram:Name>'."\n";
-	if (!empty($siren)) {
+	if ($chorus && !empty($siret14)) {
+		$xml .= '      <ram:SpecifiedLegalOrganization>'."\n";
+		$xml .= '        <ram:ID schemeID="0009">'.lemonfacturx_xml_encode($siret14).'</ram:ID>'."\n";
+		$xml .= '      </ram:SpecifiedLegalOrganization>'."\n";
+	} elseif (!empty($siren)) {
 		$xml .= '      <ram:SpecifiedLegalOrganization>'."\n";
 		$xml .= '        <ram:ID schemeID="0002">'.lemonfacturx_xml_encode($siren).'</ram:ID>'."\n";
 		$xml .= '      </ram:SpecifiedLegalOrganization>'."\n";
@@ -1239,6 +1262,60 @@ function lemonfacturx_extract_siren($siret)
 		return '';
 	}
 	return substr(preg_replace('/[^0-9]/', '', $siret), 0, 9);
+}
+
+/**
+ * Détermine si une facture relève du circuit Chorus Pro (B2G, secteur public),
+ * auquel cas un PDF Factur-X au profil Chorus doit être généré EN PLUS du PDF
+ * EN16931 standard. Trois signaux (du plus explicite au filet de sécurité) :
+ *   1. case à cocher « Facture Chorus Pro » sur la facture (extrafield lfxchorus) ;
+ *   2. présence d'un champ Chorus rempli (code service / engagement / marché) ;
+ *   3. acheteur = État central (SIRET commençant par 110002011).
+ *
+ * @param Facture $invoice  Facture Dolibarr (thirdparty et array_options chargés)
+ * @return bool
+ */
+function lemonfacturx_is_chorus_invoice($invoice)
+{
+	$ao = (is_object($invoice) && !empty($invoice->array_options)) ? $invoice->array_options : [];
+
+	if (!empty($ao['options_lfxchorus'])) {
+		return true;
+	}
+	foreach (['options_lfxservicecode', 'options_lfxengagement', 'options_lfxmarche'] as $k) {
+		if (!empty($ao[$k])) {
+			return true;
+		}
+	}
+	// Filet auto : État central. Les collectivités/hôpitaux ont leur propre SIREN
+	// et doivent être marqués via la case à cocher — d'où le signal n°1 primaire.
+	$buyer = (is_object($invoice) && !empty($invoice->thirdparty)) ? $invoice->thirdparty : null;
+	if (is_object($buyer) && !empty($buyer->idprof2)) {
+		$siret = preg_replace('/[^0-9]/', '', $buyer->idprof2);
+		if (strpos($siret, '110002011') === 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Construit le tableau d'options pour générer le XML au profil Chorus Pro à
+ * partir des extrafields de la facture (code service BT-10, n° engagement BT-13,
+ * n° marché BT-12).
+ *
+ * @param Facture $invoice
+ * @return array  options pour lemonfacturx_build_xml()
+ */
+function lemonfacturx_chorus_options($invoice)
+{
+	$ao = (is_object($invoice) && !empty($invoice->array_options)) ? $invoice->array_options : [];
+	return [
+		'profile'      => 'choruspro',
+		'service_code' => trim((string) ($ao['options_lfxservicecode'] ?? '')),
+		'engagement'   => trim((string) ($ao['options_lfxengagement'] ?? '')),
+		'marche'       => trim((string) ($ao['options_lfxmarche'] ?? '')),
+	];
 }
 
 /**
