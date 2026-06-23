@@ -1481,6 +1481,11 @@ function lemonfacturx_detect_php_cli()
 	$candidates = array();
 	if (defined('PHP_BINARY') && PHP_BINARY !== '') {
 		$candidates[] = str_replace(array('php-fpm', '/sbin/'), array('php', '/bin/'), PHP_BINARY);
+		// Windows : dériver php.exe du dossier du binaire web
+		// (ex C:\php\php-cgi.exe → C:\php\php.exe).
+		if (DIRECTORY_SEPARATOR === '\\') {
+			$candidates[] = dirname(PHP_BINARY).'\\php.exe';
+		}
 	}
 	foreach (array('/usr/bin/', '/usr/local/bin/', '') as $dir) {
 		$candidates[] = $dir.'php'.$want;
@@ -1513,16 +1518,31 @@ function lemonfacturx_php_cli_is_valid($cand, $wantVersion = '')
 	if (!function_exists('exec')) {
 		return false;
 	}
+	// Sonde cross-plateforme via `php -v` (et NON `php -r "..."`) : un snippet -r
+	// contient des guillemets, or escapeshellarg() sous Windows remplace les "
+	// par des espaces — la commande serait cassée. `php -v` n'a aucun guillemet.
+	// La redirection d'erreurs diffère aussi : NUL sous Windows, /dev/null sinon.
+	// 1re ligne de `php -v` : « PHP 8.2.30 (cli) (built: ...) ... »
+	$devnull = (DIRECTORY_SEPARATOR === '\\') ? 'NUL' : '/dev/null';
 	$out = array();
 	$rc = 1;
-	@exec(escapeshellarg($cand).' -r '.escapeshellarg('echo PHP_SAPI."|".PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;').' 2>/dev/null', $out, $rc);
-	$line = isset($out[0]) ? trim($out[0]) : '';
-	if ($rc !== 0 || strpos($line, 'cli|') !== 0) {
+	@exec(escapeshellarg($cand).' -v 2>'.$devnull, $out, $rc);
+	if ($rc !== 0) {
 		return false;
 	}
+	$version = '';
+	foreach ($out as $line) {
+		// SAPI « (cli) » sur la ligne de version = c'est bien un binaire CLI.
+		if (preg_match('/^PHP\s+(\d+\.\d+)\.[^\s]*\s+\(cli\)/i', $line, $m)) {
+			$version = $m[1];
+			break;
+		}
+	}
+	if ($version === '') {
+		return false; // pas exécutable, ou SAPI != cli
+	}
 	if ($wantVersion !== '') {
-		$parts = explode('|', $line);
-		return isset($parts[1]) && $parts[1] === $wantVersion;
+		return $version === $wantVersion;
 	}
 	return true;
 }
