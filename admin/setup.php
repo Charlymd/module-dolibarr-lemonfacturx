@@ -54,6 +54,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		['LEMONFACTURX_CHORUS_ENABLED', GETPOSTINT('LEMONFACTURX_CHORUS_ENABLED'), 'int'],
 		['LEMONFACTURX_PHP_CLI_PATH', trim(GETPOST('LEMONFACTURX_PHP_CLI_PATH', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_VERAPDF_PATH', trim(GETPOST('LEMONFACTURX_VERAPDF_PATH', 'alphanohtml')), 'chaine'],
+		['LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', trim(GETPOST('LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', 'alphanohtml')), 'chaine'],
 		['LEMONFACTURX_NOTE_PMD',     trim(GETPOST('LEMONFACTURX_NOTE_PMD', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTE_PMT',     trim(GETPOST('LEMONFACTURX_NOTE_PMT', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTE_AAB',     trim(GETPOST('LEMONFACTURX_NOTE_AAB', 'restricthtml')),    'chaine'],
@@ -194,6 +195,15 @@ print '<input type="text" name="LEMONFACTURX_PHP_CLI_PATH" class="flat minwidth3
 // Vide = pas de post-validation (le contrôle XSD + règles BR internes reste actif).
 print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXVeraPdfPath").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXVeraPdfPathHint").'</span></td><td>';
 print '<input type="text" name="LEMONFACTURX_VERAPDF_PATH" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_VERAPDF_PATH', '')).'" placeholder="'.$langs->trans("LemonFacturXVeraPdfPlaceholder").'"></td></tr>';
+
+// ---- Bloc 6 : Adressage Plateforme Agréée (PA) ----
+// Suffixe d'endpoint VENDEUR (BT-34). Certaines PA exigent que l'adresse
+// électronique du vendeur ne soit pas le SIREN nu mais un endpoint suffixé
+// (ex Hubtimize : "<SIREN>_Status"). Vide = SIREN nu. L'adresse acheteur
+// (BT-49) reste toujours le SIREN nu (la PA destinataire route).
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans("LemonFacturXSecPA").'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXEndpointSuffixSeller").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXEndpointSuffixSellerHint").'</span></td><td>';
+print '<input type="text" name="LEMONFACTURX_ENDPOINT_SUFFIX_SELLER" class="flat minwidth300" value="'.dol_escape_htmltag(getDolGlobalString('LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', '')).'" placeholder="'.$langs->trans("LemonFacturXEndpointSuffixSellerPlaceholder").'"></td></tr>';
 
 print '</table>';
 print '<br><div class="center"><input type="submit" class="button button-save" value="'.$langs->trans("Save").'"></div>';

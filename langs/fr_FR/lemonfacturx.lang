@@ -189,3 +189,7 @@ LemonFacturXNotesInFooter = Recopier les mentions en pied de facture
 LemonFacturXNotesInFooterHint = Si Oui, ajoute les mentions ci-dessus à « Mention complémentaire sur les factures » (pied de chaque PDF), sans toucher au texte existant. Appliqué à l'enregistrement.
 LemonFacturXPhpCliAutoPlaceholder = auto (détecté)
 LemonFacturXDiagPhpCliAuto = auto-détecté
+LemonFacturXSecPA = Adressage Plateforme Agréée (PA)
+LemonFacturXEndpointSuffixSeller = Suffixe d'endpoint vendeur (BT-34)
+LemonFacturXEndpointSuffixSellerHint = Suffixe ajouté au SIREN de l'émetteur dans l'adresse électronique du vendeur. Certaines PA (ex. Hubtimize/Esalink) exigent que cette adresse ne soit pas le SIREN nu mais un endpoint Peppol suffixé — « SIREN_Status » (adresse de retour des statuts de cycle de vie), tel que paramétré à l'enregistrement de l'entité. Doit correspondre, au caractère près, à l'adresse enregistrée auprès de la PA. Vide = SIREN nu (annuaire PPF historique). N'affecte PAS l'adresse acheteur (BT-49), toujours en SIREN nu.
+LemonFacturXEndpointSuffixSellerPlaceholder = ex : _Status — vide = SIREN nu

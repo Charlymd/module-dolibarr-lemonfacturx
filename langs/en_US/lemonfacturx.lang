@@ -189,3 +189,7 @@ LemonFacturXNotesInFooter = Copy the mentions into the invoice footer
 LemonFacturXNotesInFooterHint = If Yes, appends the mentions above to "Additional text on invoices" (footer of each PDF), without touching existing text. Applied on save.
 LemonFacturXPhpCliAutoPlaceholder = auto (detected)
 LemonFacturXDiagPhpCliAuto = auto-detected
+LemonFacturXSecPA = Approved Platform (PA) addressing
+LemonFacturXEndpointSuffixSeller = Seller endpoint suffix (BT-34)
+LemonFacturXEndpointSuffixSellerHint = Suffix appended to the issuer SIREN in the seller electronic address. Some Approved Platforms (e.g. Hubtimize/Esalink) require this address NOT to be the bare SIREN but a suffixed Peppol endpoint — "SIREN_Status" (lifecycle-status return address), as configured when registering the entity. Must match, byte for byte, the address registered on the PA. Empty = bare SIREN (legacy PPF directory). Does NOT affect the buyer address (BT-49), always kept as bare SIREN.
+LemonFacturXEndpointSuffixSellerPlaceholder = e.g. _Status — empty = bare SIREN

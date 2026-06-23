@@ -894,8 +894,9 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode 
 	$xml .= '      </ram:PostalTradeAddress>'."\n";
 	// BT-34 (vendeur) / BT-49 (acheteur) : adresse électronique de routage.
 	// Le réseau des Plateformes Agréées (réforme FR) route par SIREN ; l'endpoint
-	// porte donc le SIREN avec schemeID="0225" (annuaire PPF), pas l'email.
-	$xml .= lemonfacturx_build_endpoint_uri($siren, $email);
+	// porte donc le SIREN avec schemeID="0225" (annuaire PPF), pas l'email. Le rôle
+	// est transmis : certaines PA exigent un suffixe sur l'adresse VENDEUR.
+	$xml .= lemonfacturx_build_endpoint_uri($siren, $email, $role);
 	if (!empty($vat)) {
 		$xml .= '      <ram:SpecifiedTaxRegistration>'."\n";
 		$xml .= '        <ram:ID schemeID="VA">'.lemonfacturx_xml_encode($vat).'</ram:ID>'."\n";
@@ -925,15 +926,25 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode 
  * étranger hors périmètre), repli sur l'email (schemeID="EM"). Renvoie une chaîne
  * vide si aucune adresse n'est disponible, pour ne pas émettre de bloc vide.
  *
+ * Suffixe VENDEUR : certaines PA exigent que l'adresse électronique du vendeur
+ * (BT-34) ne soit PAS le SIREN nu mais un endpoint suffixé — p.ex. Hubtimize/
+ * Esalink attend "<SIREN>_Status" (adresse de retour des statuts de cycle de vie),
+ * tel que paramétré à l'enregistrement de l'entité sur la PA. Configurable via
+ * LEMONFACTURX_ENDPOINT_SUFFIX_SELLER (vide par défaut). Appliqué AU vendeur
+ * uniquement : l'adresse acheteur (BT-49) reste le SIREN nu, la PA destinataire
+ * se chargeant du routage — on ne préjuge pas de son endpoint.
+ *
  * @param string $siren SIREN 9 chiffres (vide si absent)
  * @param string $email Email de repli
+ * @param string $role  'Seller' (BT-34, suffixe appliqué) ou 'Buyer' (BT-49, nu)
  * @return string Bloc <ram:URIUniversalCommunication> ou chaîne vide
  */
-function lemonfacturx_build_endpoint_uri($siren, $email)
+function lemonfacturx_build_endpoint_uri($siren, $email, $role = 'Seller')
 {
 	if (!empty($siren)) {
 		$scheme = '0225';
-		$value  = $siren;
+		$suffix = ($role === 'Seller') ? trim(getDolGlobalString('LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', '')) : '';
+		$value  = $siren.$suffix;
 	} elseif (!empty($email)) {
 		$scheme = 'EM';
 		$value  = $email;
