@@ -93,8 +93,11 @@ class modLemonFacturX extends DolibarrModules
 		// complete_head_from_modules(). Avec « facture » l'onglet n'apparaît jamais.
 		// La condition (5e champ) est évaluée au RUNTIME : l'onglet n'apparaît que
 		// si les fonctionnalités Chorus sont activées (opt-in, sans réactivation).
+		// NB : utiliser getDolGlobalInt() et NON $conf->global->XXX — le dol_eval
+		// durci de Dolibarr 23 n'évalue plus la syntaxe $conf->global->XXX (la
+		// condition tombe à faux et l'onglet disparaît). getDolGlobalInt() passe.
 		$this->tabs = array(
-			'invoice:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:$conf->global->LEMONFACTURX_CHORUS_ENABLED:/lemonfacturx/chorus_tab.php?id=__ID__',
+			'invoice:+lemonfacturxchorus:LemonFacturXChorusTab:lemonfacturx@lemonfacturx:getDolGlobalInt("LEMONFACTURX_CHORUS_ENABLED"):/lemonfacturx/chorus_tab.php?id=__ID__',
 		);
 	}
 

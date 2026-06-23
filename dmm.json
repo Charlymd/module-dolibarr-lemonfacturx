@@ -12,7 +12,7 @@
   "compatibility": {
     "3.x": {
       "dolibarr_min": "19.0.0",
-      "dolibarr_max": "22.*",
+      "dolibarr_max": "23.*",
       "php_min": "8.1"
     }
   },

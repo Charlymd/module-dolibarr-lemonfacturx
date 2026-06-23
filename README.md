@@ -8,7 +8,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Prérequis
 
-- **Dolibarr** 19.0+ (testé sur 22.0.x) — vérifié à l'activation (`need_dolibarr_version`)
+- **Dolibarr** 19.0 → 23.x — vérifié à l'activation (`need_dolibarr_version`)
 - **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
 - **Fonction `exec()`** activée (subprocess d'injection PDF) — vérifiée par le diagnostic
 - **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
