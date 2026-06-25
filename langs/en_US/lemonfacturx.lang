@@ -2,7 +2,6 @@ Module210000Name = LemonFacturX
 Module210000Desc = Automatic Factur-X EN16931 e-invoice generation
 
 LemonFacturXSetup = LemonFacturX setup
-LemonFacturXEnabled = Enable Factur-X conversion
 LemonFacturXBankAccount = Bank account (IBAN/BIC)
 LemonFacturXPaymentMeans = Default payment means
 LemonFacturXPaymentMeansHint = UNTDID 4461 code. 30/58 (credit transfer) require an IBAN: without a configured bank account, the payment means block is omitted from the XML (BR-61). 59 (SEPA direct debit) publishes the creditor ICS (Dolibarr constant PRELEVEMENT_ICS), the mandate reference and the IBAN of the third party's default bank account.
@@ -10,23 +9,6 @@ PaymentMeans30 = Credit transfer
 PaymentMeans58 = SEPA credit transfer
 PaymentMeans59 = SEPA direct debit
 PaymentMeans49 = Direct debit (national)
-LemonFacturXEndpointScheme = Electronic address scheme (endpoint BT-34/BT-49)
-LemonFacturXEndpointSchemeHint = Scheme code of the routing electronic address (URIID). 0225 = SIREN in the French PPF directory (Plateformes Agréées network, default for the French reform). 0002/0009 = SIREN/SIRET ISO 6523 if your platform requires it. For a third party without SIREN (foreign), the email is used automatically.
-EndpointScheme0225 = SIREN (PPF directory, French reform)
-EndpointScheme0002 = SIREN (ISO 6523)
-EndpointScheme0009 = SIRET (ISO 6523)
-LemonFacturXLegalIdScheme = Legal identifier (BT-30 / BT-47)
-LemonFacturXLegalIdSchemeHint = Identifier carried by SpecifiedLegalOrganization. ISO 6523: 0002 = SIREN (9 digits), 0009 = SIRET (14 digits). The default "SIRET (0009)" is ISO 6523 compliant and accepted by Chorus Pro. "SIRET (0002)" reproduces the 2.1.x behaviour.
-LegalIdSchemeSiret0009 = SIRET, schemeID 0009 (default, ISO 6523 compliant)
-LegalIdSchemeSiren0002 = SIREN, schemeID 0002 (ISO 6523 compliant, rejected by Chorus Pro)
-LegalIdSchemeSiret0002 = SIRET, schemeID 0002 (2.1.x legacy)
-LemonFacturXVatDueDateType = VAT point date option (BT-8)
-LemonFacturXVatDueDateTypeHint = Your company's VAT option: 72 = VAT on payments (cash accounting, French default for services), 5 = VAT on invoicing (debits, mandatory mention if opted in). Omitted from the XML if empty. Only emitted on taxed categories (S).
-VatDueDateTypeNone = Not specified (omitted from XML)
-VatDueDateType72 = VAT on payments (encaissements)
-VatDueDateType5 = VAT on debits (débits)
-LemonFacturXBt23Process = Business process (BT-23)
-LemonFacturXBt23ProcessHint = BusinessProcess of the document context. Chorus Pro B2G: A1 (invoice deposit), A2 (already paid invoice)... French reform (PPF/PDP): B1, S1, S2, M1... Leave empty to omit (tolerated as long as your platform does not require it).
 LemonFacturXBrCheck = EN16931 business rules check
 LemonFacturXBrCheckHint = Checks a subset of the EN16931 Schematron rules before injection (BR-CO-10..17, BR-27, BR-61, BR-IC-11/12, VAT category consistency...). Violations block in strict mode, otherwise they are added to the warnings.
 LemonFacturXVeraPdfPath = PDF/A-3 validation with veraPDF (optional, external tool)
@@ -193,3 +175,12 @@ LemonFacturXSecPA = Approved Platform (PA) addressing
 LemonFacturXEndpointSuffixSeller = Seller endpoint suffix (BT-34)
 LemonFacturXEndpointSuffixSellerHint = Suffix appended to the issuer SIREN in the seller electronic address. Some Approved Platforms (e.g. Hubtimize/Esalink) require this address NOT to be the bare SIREN but a suffixed Peppol endpoint — "SIREN_Status" (lifecycle-status return address), as configured when registering the entity. Must match, byte for byte, the address registered on the PA. Empty = bare SIREN (legacy PPF directory). Does NOT affect the buyer address (BT-49), always kept as bare SIREN.
 LemonFacturXEndpointSuffixSellerPlaceholder = e.g. _Status — empty = bare SIREN
+LemonFacturXNotesOverwrite = Overwrite the existing Dolibarr mention
+LemonFacturXNotesOverwriteHint = If No, our mentions are appended after the existing "Additional text on invoices". If Yes, they replace it entirely. Either way, an empty field is filled with our mentions.
+LemonFacturXNotesAppend = append
+LemonFacturXNotesReplace = replace
+LemonFacturXChorusToNote = Copy the Chorus references to the public note
+LemonFacturXChorusToNoteHint = Adds the filled Chorus fields (framework, service code, engagement no., contract no.) to the invoice public note, which is printed on the PDF. Empty fields ignored, no duplicates.
+LemonFacturXChorusToNoteDone = %s Chorus reference(s) added to the public note
+LemonFacturXChorusToNoteAlready = The Chorus references are already in the public note
+LemonFacturXChorusToNoteEmpty = No filled Chorus field to copy

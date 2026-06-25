@@ -26,7 +26,7 @@ class modLemonFacturX extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Génération automatique de factures Factur-X EN16931";
 		$this->descriptionlong = "Injecte un XML CrossIndustryInvoice EN16931 dans chaque PDF facture client généré, pour conformité Factur-X.";
-		$this->version = '3.6.1';
+		$this->version = '3.6.2';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -75,7 +75,8 @@ class modLemonFacturX extends DolibarrModules
 			array('LEMONFACTURX_NOTE_PMD', 'chaine', '', 'Mention légale pénalités de retard (BR-FR-05, default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_PMT', 'chaine', '', 'Mention légale indemnité de recouvrement (default appliqué si vide)', 1, 'current', 0),
 			array('LEMONFACTURX_NOTE_AAB', 'chaine', '', 'Mention légale escompte anticipé (default appliqué si vide)', 1, 'current', 0),
-			array('LEMONFACTURX_NOTES_IN_FOOTER', 'int', '0', 'Recopier les mentions BR-FR-05 dans le pied de facture (FACTURE_FREE_TEXT)', 1, 'current', 0),
+			array('LEMONFACTURX_NOTES_IN_FOOTER', 'int', '0', 'Recopier les mentions BR-FR-05 dans le pied de facture (INVOICE_FREE_TEXT)', 1, 'current', 0),
+			array('LEMONFACTURX_NOTES_OVERWRITE', 'int', '0', 'Recopie : écraser la mention Dolibarr existante (1) au lieu d\'ajouter nos mentions à la suite (0)', 1, 'current', 0),
 			array('LEMONFACTURX_CHORUS_ENABLED', 'int', '0', 'Activer les fonctionnalités Chorus Pro (onglet, menu, 2e PDF) — opt-in', 1, 'current', 0),
 		);
 

@@ -1414,27 +1414,65 @@ function lemonfacturx_fix_chorus_extrafields_display($db)
 	return $res ? $db->affected_rows($res) : 0;
 }
 
-function lemonfacturx_append_notes_to_footer($db)
+function lemonfacturx_append_notes_to_footer($db, $overwrite = null)
 {
 	global $conf;
-	$freeText = getDolGlobalString('FACTURE_FREE_TEXT', '');
-	$added = 0;
+	// Depuis Dolibarr 17, la « Mention complémentaire sur les factures » est
+	// stockée dans INVOICE_FREE_TEXT (ex-FACTURE_FREE_TEXT) — c'est CETTE
+	// constante que le PDF imprime. On vise donc INVOICE_FREE_TEXT.
+	$constName = lemonfacturx_invoice_freetext_const();
+	if ($overwrite === null) {
+		$overwrite = (getDolGlobalInt('LEMONFACTURX_NOTES_OVERWRITE', 0) === 1);
+	}
+	$freeText = getDolGlobalString($constName, '');
+	$mentions = array();
 	foreach (array(
 		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
 		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
 		lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
-	) as $mention) {
-		$mention = trim($mention);
-		if ($mention === '' || strpos($freeText, $mention) !== false) {
-			continue;
+	) as $m) {
+		$m = trim($m);
+		if ($m !== '') {
+			$mentions[] = $m;
 		}
-		$freeText = ($freeText !== '' ? rtrim($freeText)."\n" : '').$mention;
-		$added++;
 	}
-	if ($added > 0) {
-		dolibarr_set_const($db, 'FACTURE_FREE_TEXT', $freeText, 'chaine', 0, '', $conf->entity);
+	$added = 0;
+	if ($overwrite || trim($freeText) === '') {
+		// Champ vide OU option « écraser » : on (re)met nos mentions.
+		$newText = implode("\n", $mentions);
+		$added = ($newText !== $freeText) ? count($mentions) : 0;
+	} else {
+		// On AJOUTE nos mentions après le texte existant (seulement celles
+		// qui manquent), sans toucher au reste.
+		$newText = $freeText;
+		foreach ($mentions as $m) {
+			if (strpos($newText, $m) !== false) {
+				continue;
+			}
+			$newText = rtrim($newText)."\n".$m;
+			$added++;
+		}
+	}
+	if ($newText !== $freeText) {
+		dolibarr_set_const($db, $constName, $newText, 'chaine', 0, '', $conf->entity);
 	}
 	return $added;
+}
+
+/**
+ * Nom de la constante de « mention complémentaire sur les factures » : Dolibarr
+ * l'a renommée FACTURE_FREE_TEXT → INVOICE_FREE_TEXT en v17, et c'est CELLE-CI
+ * que le modèle PDF lit. Le module cible Dolibarr 19+ → toujours INVOICE_FREE_TEXT.
+ *
+ * NB : surtout PAS de détection « celle qui a du contenu » — si l'ancienne
+ * FACTURE_FREE_TEXT traîne un résidu, on écrirait dans une constante que le PDF
+ * n'imprime plus (et le champ INVOICE_FREE_TEXT vide ne serait jamais rempli).
+ *
+ * @return string
+ */
+function lemonfacturx_invoice_freetext_const()
+{
+	return 'INVOICE_FREE_TEXT';
 }
 
 /**

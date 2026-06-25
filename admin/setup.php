@@ -64,6 +64,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		['LEMONFACTURX_NOTE_PMT',     trim(GETPOST('LEMONFACTURX_NOTE_PMT', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTE_AAB',     trim(GETPOST('LEMONFACTURX_NOTE_AAB', 'restricthtml')),    'chaine'],
 		['LEMONFACTURX_NOTES_IN_FOOTER', GETPOSTINT('LEMONFACTURX_NOTES_IN_FOOTER'), 'int'],
+		['LEMONFACTURX_NOTES_OVERWRITE', GETPOSTINT('LEMONFACTURX_NOTES_OVERWRITE'), 'int'],
 	];
 	foreach ($updates as $u) {
 		if (dolibarr_set_const($db, $u[0], $u[1], $u[2], 0, '', $conf->entity) < 0) {
@@ -71,11 +72,13 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		}
 	}
 
-	// Toggle « recopier les mentions en pied » à Oui → on (re)pousse les mentions
-	// manquantes dans FACTURE_FREE_TEXT (sans toucher l'existant). Idempotent.
+	// Toggle « recopier les mentions en pied » à Oui → on pousse nos mentions
+	// dans la « Mention complémentaire » de la facture (INVOICE_FREE_TEXT, celle
+	// que le PDF imprime). Champ vide = on met nos mentions ; sinon on AJOUTE à
+	// la suite, sauf si l'option « écraser » est active (alors on remplace).
 	$footerAdded = 0;
 	if (!$error && GETPOSTINT('LEMONFACTURX_NOTES_IN_FOOTER')) {
-		$footerAdded = lemonfacturx_append_notes_to_footer($db);
+		$footerAdded = lemonfacturx_append_notes_to_footer($db, GETPOSTINT('LEMONFACTURX_NOTES_OVERWRITE') === 1);
 	}
 
 	if (!$error) {
@@ -166,6 +169,12 @@ $notesFooter = getDolGlobalInt('LEMONFACTURX_NOTES_IN_FOOTER', 0);
 print '<select name="LEMONFACTURX_NOTES_IN_FOOTER" class="flat">';
 print '<option value="0"'.(!$notesFooter ? ' selected' : '').'>'.$langs->trans("No").'</option>';
 print '<option value="1"'.($notesFooter ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXNotesOverwrite").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXNotesOverwriteHint").'</span></td><td>';
+$notesOverwrite = getDolGlobalInt('LEMONFACTURX_NOTES_OVERWRITE', 0);
+print '<select name="LEMONFACTURX_NOTES_OVERWRITE" class="flat">';
+print '<option value="0"'.(!$notesOverwrite ? ' selected' : '').'>'.$langs->trans("No").' ('.$langs->trans("LemonFacturXNotesAppend").')</option>';
+print '<option value="1"'.($notesOverwrite ? ' selected' : '').'>'.$langs->trans("Yes").' ('.$langs->trans("LemonFacturXNotesReplace").')</option>';
 print '</select></td></tr>';
 
 // ---- Bloc 3 : Secteur public (Chorus Pro) ----
@@ -310,8 +319,10 @@ if ($forceFont === '') {
 // l'affiche en avertissement (orange) et PUREMENT informatif : le diagnostic
 // constate, c'est le toggle « recopier les mentions en pied » du bloc Mentions
 // légales qui règle (comme les autres items, pas de contrôle dans le diag).
-$freeTextDiag = getDolGlobalString('FACTURE_FREE_TEXT', '');
-if ($freeTextDiag === '') {
+// On lit la BONNE constante (INVOICE_FREE_TEXT depuis Dolibarr 17, celle que
+// le PDF imprime) — pas l'ancienne FACTURE_FREE_TEXT qui n'était plus lue.
+$freeTextDiag = getDolGlobalString(lemonfacturx_invoice_freetext_const(), '');
+if (trim($freeTextDiag) === '') {
 	$diagWarnings[] = ['msg' => $langs->trans("LemonFacturXDiagFreeTextMissing")];
 } else {
 	$diagOk[] = $langs->trans("LemonFacturXDiagFreeTextOk");

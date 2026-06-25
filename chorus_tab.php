@@ -61,6 +61,54 @@ if ($action === 'savechorus' && $user->hasRight('facture', 'creer')) {
 }
 
 /*
+ * Report manuel des références Chorus remplies dans la note publique (visible
+ * sur le PDF). Sur demande uniquement (bouton) : les champs Chorus sont sinon
+ * masqués du PDF. N'ajoute que les champs non vides, sans doublon, sans toucher
+ * au reste de la note.
+ */
+if ($action === 'writechorusnote' && $user->hasRight('facture', 'creer')) {
+	if (GETPOST('token', 'alpha') !== newToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	$o = $object->array_options;
+	$lines = array();
+	if (!empty($o['options_lfxcadre'])) {
+		$frameworks = lemonfacturx_chorus_frameworks();
+		$code = $o['options_lfxcadre'];
+		$lines[] = $langs->trans('LemonFacturXEfCadre').' : '.(isset($frameworks[$code]) ? $frameworks[$code] : $code);
+	}
+	if (!empty($o['options_lfxservicecode'])) {
+		$lines[] = $langs->trans('LemonFacturXEfServiceCode').' : '.$o['options_lfxservicecode'];
+	}
+	if (!empty($o['options_lfxengagement'])) {
+		$lines[] = $langs->trans('LemonFacturXEfEngagement').' : '.$o['options_lfxengagement'];
+	}
+	if (!empty($o['options_lfxmarche'])) {
+		$lines[] = $langs->trans('LemonFacturXEfMarche').' : '.$o['options_lfxmarche'];
+	}
+	if (empty($lines)) {
+		setEventMessages($langs->trans('LemonFacturXChorusToNoteEmpty'), null, 'warnings');
+	} else {
+		$note = (string) $object->note_public;
+		$added = 0;
+		foreach ($lines as $l) {
+			if (strpos($note, $l) !== false) {
+				continue;
+			}
+			$note = ($note !== '' ? rtrim($note)."\n" : '').$l;
+			$added++;
+		}
+		if ($added > 0 && $object->update_note($note, '_public') > 0) {
+			setEventMessages($langs->trans('LemonFacturXChorusToNoteDone', $added), null, 'mesgs');
+		} elseif ($added === 0) {
+			setEventMessages($langs->trans('LemonFacturXChorusToNoteAlready'), null, 'mesgs');
+		} else {
+			setEventMessages($object->error, $object->errors, 'errors');
+		}
+	}
+}
+
+/*
  * Vue
  */
 llxHeader('', $langs->trans('LemonFacturXChorusTab').' — '.$object->ref);
@@ -119,6 +167,17 @@ print '<div class="center" style="margin-top:14px;">';
 print '<input type="submit" class="button button-save" value="'.$langs->trans('Save').'">';
 print '</div>';
 print '</form>';
+
+// Bouton manuel : reporter les références Chorus remplies dans la note publique
+// de la facture (qui s'imprime sur le PDF). Sur demande, jamais automatique.
+if ($user->hasRight('facture', 'creer')) {
+	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.((int) $object->id).'" class="center" style="margin-top:16px;">';
+	print '<input type="hidden" name="token" value="'.newToken().'">';
+	print '<input type="hidden" name="action" value="writechorusnote">';
+	print '<input type="submit" class="button button-add" value="'.dol_escape_htmltag($langs->trans('LemonFacturXChorusToNote')).'">';
+	print '<div class="opacitymedium small" style="margin-top:5px;">'.$langs->trans('LemonFacturXChorusToNoteHint').'</div>';
+	print '</form>';
+}
 
 print '<div class="opacitymedium center" style="margin-top:18px;">'.$langs->trans('LemonFacturXChorusTabGenerateHint').'</div>';
 
