@@ -26,7 +26,7 @@ class modLemonFacturX extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Génération automatique de factures Factur-X EN16931";
 		$this->descriptionlong = "Injecte un XML CrossIndustryInvoice EN16931 dans chaque PDF facture client généré, pour conformité Factur-X.";
-		$this->version = '3.6.0';
+		$this->version = '3.6.1';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -112,6 +112,7 @@ class modLemonFacturX extends DolibarrModules
 	{
 		$result = $this->_init(array(), $options);
 		$this->createChorusExtraFields();
+		$this->fixChorusExtraFieldsDisplay();
 		return $result;
 	}
 
@@ -167,5 +168,25 @@ class modLemonFacturX extends DolibarrModules
 				'lemonfacturx@lemonfacturx', '$conf->lemonfacturx->enabled'
 			);
 		}
+	}
+
+	/**
+	 * Force printable=0 et list=0 sur les extrafields Chorus.
+	 *
+	 * Ces champs sont internes (édités uniquement dans l'onglet « Chorus Pro »)
+	 * et ne doivent JAMAIS s'imprimer sur le PDF. Or Dolibarr 23 crée les
+	 * extrafields avec printable!=0 et son modèle PDF (pdf_sponge →
+	 * getExtrafieldsInHtml) imprime dans la NOTE du PDF tout extrafield dont
+	 * printable vaut 1 ou 2 → un bloc de libellés Chorus vides apparaissait dans
+	 * la description de la facture (signalé sur Dolibarr 23.0.1).
+	 *
+	 * On force donc printable=0 (et list=0) de façon idempotente : exécuté à
+	 * chaque activation, ça corrige aussi les installations déjà créées de
+	 * travers. Inoffensif sur Dolibarr ≤ 22 (déjà à 0).
+	 */
+	private function fixChorusExtraFieldsDisplay()
+	{
+		require_once dol_buildpath('/lemonfacturx/core/lib/lemonfacturx.lib.php');
+		lemonfacturx_fix_chorus_extrafields_display($this->db);
 	}
 }

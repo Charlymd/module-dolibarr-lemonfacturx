@@ -1390,6 +1390,30 @@ function lemonfacturx_chorus_frameworks()
  * @param DoliDB $db
  * @return int  Nombre de mentions ajoutées
  */
+/**
+ * Force printable=0 et list=0 sur les extrafields Chorus (lfx*).
+ *
+ * Ces champs sont internes (édités dans l'onglet « Chorus Pro » dédié) et ne
+ * doivent jamais s'imprimer sur le PDF. Dolibarr 23 les crée avec printable!=0,
+ * et son modèle PDF (pdf_sponge → getExtrafieldsInHtml) imprime dans la NOTE du
+ * PDF tout extrafield dont printable vaut 1 ou 2 → un bloc de libellés Chorus
+ * vides apparaissait dans la description de la facture (Dolibarr 23.0.1).
+ * Idempotent, inoffensif sur Dolibarr ≤ 22 (déjà à 0). Renvoie le nb de lignes
+ * corrigées.
+ *
+ * @param DoliDB $db
+ * @return int
+ */
+function lemonfacturx_fix_chorus_extrafields_display($db)
+{
+	$names = "'lfxchorus','lfxcadre','lfxservicecode','lfxengagement','lfxmarche'";
+	$sql = "UPDATE ".MAIN_DB_PREFIX."extrafields SET printable = 0, list = '0'";
+	$sql .= " WHERE elementtype = 'facture' AND name IN (".$names.")";
+	$sql .= " AND (printable <> 0 OR list <> '0')";
+	$res = $db->query($sql);
+	return $res ? $db->affected_rows($res) : 0;
+}
+
 function lemonfacturx_append_notes_to_footer($db)
 {
 	global $conf;

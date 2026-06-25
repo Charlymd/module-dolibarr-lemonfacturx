@@ -33,6 +33,11 @@ if (!$user->admin) {
 
 $langs->loadLangs(["admin", "lemonfacturx@lemonfacturx"]);
 
+// Auto-correctif : sous Dolibarr 23 les extrafields Chorus pouvaient être créés
+// avec printable!=0 et polluaient la note du PDF (cf lemonfacturx_fix_chorus_*).
+// On corrige à l'ouverture de la config — pas besoin de réactiver le module.
+lemonfacturx_fix_chorus_extrafields_display($db);
+
 $action = GETPOST('action', 'aZ09');
 
 // Les valeurs par défaut des mentions légales BR-FR sont définies dans la lib
