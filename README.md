@@ -132,11 +132,11 @@ Modèle de menace, protections détaillées et processus de signalement : voir [
 | BT-1 Invoice ID | `$invoice->ref` |
 | BT-2 Issue date | `$invoice->date` |
 | BT-3 Type code | 380 / 381 (avoir) / 384 (rectificative) / 386 (acompte) |
-| BT-8 VAT due date code | `LEMONFACTURX_VAT_DUE_DATE_TYPE` (5 débits / 72 encaissements, omis si vide) |
+| BT-8 VAT due date code | Régime TVA Dolibarr (`TAX_MODE`) : 5 débits / 72 encaissements, omis si indéterminé |
 | BT-9 Due date | `$invoice->date_lim_reglement` |
 | BT-10 Buyer reference | `$invoice->ref_client` (code service / n° engagement Chorus Pro) |
 | BT-13 Order reference | Réf. de la première commande client liée |
-| BT-23 Business process | `LEMONFACTURX_BT23_PROCESS` (A1, B1, S1..., omis si vide) |
+| BT-23 Business process | Cadre de facturation choisi **par facture** (profil Chorus Pro : `A1` par défaut), omis hors Chorus Pro |
 | BT-25/BG-3 Preceding invoice | `fk_facture_source` (avoir/rectificative) + acomptes imputés |
 | Seller / Buyer | `$mysoc` / `$invoice->thirdparty` |
 | BT-29/BT-46 ID établissement | `idprof2` → SIRET (14 chiffres) sous schemeID 0009 (ISO 6523) — pour Chorus Pro |
@@ -251,18 +251,18 @@ Toutes sont configurables via l'écran d'administration du module (**Accueil > C
 
 | Constante | Type | Défaut | Description |
 |---|---|---|---|
-| `LEMONFACTURX_ENABLED` | int | 1 | Activer/désactiver la conversion |
 | `LEMONFACTURX_BANK_ACCOUNT` | int | 0 | ID du compte bancaire Dolibarr |
 | `LEMONFACTURX_PAYMENT_MEANS` | string | 30 | Code UNTDID 4461 : 30 virement, 58 virement SEPA, 59 prélèvement SEPA, 49 prélèvement |
-| `LEMONFACTURX_ENDPOINT_SCHEME` | string | 0225 | Schéma de l'endpoint BT-34/BT-49 (0225 SIREN annuaire, 0002, 0009) |
-| `LEMONFACTURX_VAT_DUE_DATE_TYPE` | string | *(vide)* | BT-8 : `5` débits, `72` encaissements, vide = omis |
-| `LEMONFACTURX_BT23_PROCESS` | string | *(vide)* | BT-23 cadre de facturation (A1 Chorus B2G, B1/S1/S2 réforme), vide = omis |
 | `LEMONFACTURX_STRICT_MODE` | int | 0 | 0 = best-effort (défaut), 1 = strict (voir ci-dessous) |
 | `LEMONFACTURX_BR_CHECK` | int | 1 | Contrôle interne des règles métier EN16931 avant injection |
 | `LEMONFACTURX_INJECTION_MODE` | string | auto | Mode d'injection : `auto` (in-process + repli sous-process), `inprocess` (sans exec), `subprocess` (exec uniquement) |
 | `LEMONFACTURX_PHP_CLI_PATH` | string | *(vide)* | Chemin du binaire PHP CLI, utilisé **uniquement** par le mode `subprocess` (vide = auto-détection ; voir note ci-dessous) |
 | `LEMONFACTURX_VERAPDF_PATH` | string | *(vide)* | Chemin veraPDF : post-validation PDF/A-3b de chaque PDF généré (non bloquant) |
+| `LEMONFACTURX_ENDPOINT_SUFFIX_SELLER` | string | *(vide)* | Suffixe ajouté au SIREN vendeur dans l'endpoint électronique BT-34 (ex `_Status`) — exigé par certaines PA ; vide = SIREN nu |
 | `LEMONFACTURX_NOTE_PMD/PMT/AAB` | text | mentions FR | Mentions légales BR-FR-05 (le texte par défaut s'applique si le champ est laissé vide) |
+| `LEMONFACTURX_NOTES_IN_FOOTER` | int | 0 | Recopier les mentions BR-FR-05 dans le pied de facture (`INVOICE_FREE_TEXT`) |
+| `LEMONFACTURX_NOTES_OVERWRITE` | int | 0 | Recopie pied de facture : écraser la mention Dolibarr existante (1) au lieu d'ajouter nos mentions à la suite (0) |
+| `LEMONFACTURX_CHORUS_ENABLED` | int | 0 | Activer les fonctionnalités Chorus Pro (onglet, menu, 2ᵉ PDF) — opt-in |
 
 > **Note PHP CLI** : pertinente **uniquement en mode `subprocess`** (l'injection par défaut est in-process et n'utilise aucun binaire externe). Dans ce mode, le module auto-détecte le bon binaire PHP CLI. Sur les serveurs avec plusieurs versions de PHP, ou si l'auto-détection échoue, configurer `LEMONFACTURX_PHP_CLI_PATH` avec le chemin complet (ex: `/usr/bin/php8.2`). Ne **pas** utiliser `PHP_BINARY` : en contexte php-fpm, cette constante pointe vers le binaire fpm et non le CLI.
 
