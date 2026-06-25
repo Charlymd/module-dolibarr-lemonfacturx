@@ -921,9 +921,9 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode 
  *
  * Le réseau des Plateformes Agréées (réforme française) route les factures par
  * SIREN : l'adresse doit porter le SIREN avec schemeID="0225" (annuaire PPF,
- * XP Z12-012). Surchargeable via LEMONFACTURX_ENDPOINT_SCHEME pour une PA qui
- * attendrait un autre code ISO 6523 (0002 SIREN / 0009 SIRET). Sans SIREN (tiers
- * étranger hors périmètre), repli sur l'email (schemeID="EM"). Renvoie une chaîne
+ * XP Z12-012), schéma figé en dur (les codes ISO 6523 alternatifs 0002 SIREN /
+ * 0009 SIRET ne sont plus exposés en réglage). Sans SIREN (tiers étranger hors
+ * périmètre), repli sur l'email (schemeID="EM"). Renvoie une chaîne
  * vide si aucune adresse n'est disponible, pour ne pas émettre de bloc vide.
  *
  * Suffixe VENDEUR : certaines PA exigent que l'adresse électronique du vendeur

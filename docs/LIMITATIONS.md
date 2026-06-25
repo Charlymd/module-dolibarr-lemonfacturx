@@ -108,8 +108,9 @@ de facturation B2B (BT-23) deviendra obligatoire avec une sémantique figée.
 ### Code routage / service destinataire infra-SIREN
 **Partiel.** Le routage par service (Chorus Pro, grands comptes) passe par
 **BT-10 BuyerReference**, mappé depuis le champ standard « Référence client »
-(`ref_client`) de la facture — par facture, sans extrafield. Un routage par
-SIRET d'établissement est possible via `LEMONFACTURX_ENDPOINT_SCHEME=0009`.
+(`ref_client`) de la facture — par facture, sans extrafield. L'adressage
+électronique BT-34/BT-49 est en revanche figé sur le SIREN (`schemeID="0225"`,
+annuaire PPF) : pas de routage infra-SIREN par SIRET d'établissement.
 Pas de champ dédié par tiers : choix assumé de ne pas créer d'extrafields.
 
 ## Technique
