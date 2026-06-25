@@ -140,30 +140,14 @@ class ActionsLemonFacturX
 		}
 
 		try {
-			if (!function_exists('exec')) {
-				return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrNoExec'), $strict);
-			}
-
-			$phpBin = $this->resolvePhpBinary($strict);
-			if ($phpBin === null) {
-				// Le message a déjà été remonté par resolvePhpBinary()
-				return $strict ? -1 : 0;
-			}
-
-			$cmd  = escapeshellarg($phpBin);
-			$cmd .= ' '.escapeshellarg($modulePath.'/scripts/inject_facturx.php');
-			$cmd .= ' '.escapeshellarg($file);
-			$cmd .= ' '.escapeshellarg($this->xmlTmpFile);
-			$cmd .= ' 2>&1';
-
-			$output = [];
-			$returnCode = 0;
-			exec($cmd, $output, $returnCode);
-
-			if ($returnCode !== 0) {
-				// On tronque la sortie brute du subprocess (chemins serveur)
-				$detail = dol_trunc(implode(' ', $output), 300);
-				return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrInjectFailed').' : '.$detail, $strict);
+			// Injection du XML dans le PDF. Par défaut en IN-PROCESS (sans exec,
+			// donc compatible avec les hébergements mutualisés où exec() est
+			// désactivé) avec repli automatique sur le sous-process si besoin.
+			// Le comportement est réglable via LEMONFACTURX_INJECTION_MODE
+			// (auto | inprocess | subprocess).
+			$inj = $this->injectFacturx($file, $this->xmlTmpFile, $modulePath);
+			if (!$inj['ok']) {
+				return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrInjectFailed').' : '.dol_trunc($inj['error'], 300), $strict);
 			}
 
 			// Post-validation PDF/A-3 optionnelle via veraPDF (non bloquante)
@@ -177,7 +161,7 @@ class ActionsLemonFacturX
 				// Activé : génère le PDF Chorus EN PLUS du standard si la facture
 				// relève du public. N'altère jamais le PDF principal.
 				if (lemonfacturx_is_chorus_invoice($invoice)) {
-					$chorus = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath, $phpBin);
+					$chorus = $this->generateChorusPdf($invoice, $file, $mysoc, $modulePath);
 					if (!$chorus['ok']) {
 						$warnings[] = $chorus['msg'];
 					}
@@ -212,10 +196,9 @@ class ActionsLemonFacturX
 	 * @param string  $mainPdf     Chemin du PDF principal (source de la copie)
 	 * @param Societe $mysoc
 	 * @param string  $modulePath
-	 * @param string  $phpBin      Binaire PHP CLI déjà résolu
 	 * @return array{ok:bool,msg:string}
 	 */
-	protected function generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath, $phpBin)
+	protected function generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath)
 	{
 		$options = lemonfacturx_chorus_options($invoice);
 
@@ -248,17 +231,11 @@ class ActionsLemonFacturX
 		}
 
 		try {
-			$cmd  = escapeshellarg($phpBin);
-			$cmd .= ' '.escapeshellarg($modulePath.'/scripts/inject_facturx.php');
-			$cmd .= ' '.escapeshellarg($chorusPdf);
-			$cmd .= ' '.escapeshellarg($tmp);
-			$cmd .= ' 2>&1';
-			$output = [];
-			$rc = 0;
-			exec($cmd, $output, $rc);
-			if ($rc !== 0) {
+			// Même chemin d'injection que le PDF principal (in-process + repli).
+			$inj = $this->injectFacturx($chorusPdf, $tmp, $modulePath);
+			if (!$inj['ok']) {
 				@unlink($chorusPdf);
-				dol_syslog('LemonFacturX Chorus: injection KO : '.dol_trunc(implode(' ', $output), 300), LOG_ERR);
+				dol_syslog('LemonFacturX Chorus: injection KO : '.dol_trunc($inj['error'], 300), LOG_ERR);
 				return array('ok' => false, 'msg' => lemonfacturx_trans('LemonFacturXChorusErr'));
 			}
 		} finally {
@@ -293,12 +270,7 @@ class ActionsLemonFacturX
 			setEventMessages($langs->trans('LemonFacturXMsgNoPdf'), null, 'warnings');
 			return;
 		}
-		$phpBin = $this->resolvePhpBinary(0);
-		if ($phpBin === null) {
-			return; // message déjà émis par resolvePhpBinary
-		}
-
-		$res = $this->generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath, $phpBin);
+		$res = $this->generateChorusPdf($invoice, $mainPdf, $mysoc, $modulePath);
 		setEventMessages($res['msg'], null, $res['ok'] ? 'mesgs' : 'warnings');
 	}
 
@@ -609,6 +581,167 @@ class ActionsLemonFacturX
 		}
 
 		return $phpBin;
+	}
+
+	/**
+	 * Injecte le XML Factur-X dans le PDF selon le mode configuré
+	 * (LEMONFACTURX_INJECTION_MODE) :
+	 *  - 'auto' (défaut)  : in-process, puis repli sur le sous-process si échec ;
+	 *  - 'inprocess'      : in-process uniquement (jamais d'exec) ;
+	 *  - 'subprocess'     : sous-process uniquement (comportement historique).
+	 *
+	 * @param string $pdfPath    PDF à modifier sur place
+	 * @param string $xmlPath    Fichier XML temporaire à injecter
+	 * @param string $modulePath Racine du module
+	 * @return array{ok:bool,method:string,error:string}
+	 */
+	protected function injectFacturx($pdfPath, $xmlPath, $modulePath)
+	{
+		$mode = strtolower(trim(getDolGlobalString('LEMONFACTURX_INJECTION_MODE', 'auto')));
+		if (!in_array($mode, array('auto', 'inprocess', 'subprocess'), true)) {
+			$mode = 'auto';
+		}
+
+		$errors = array();
+
+		// In-process : mode par défaut et 1re tentative du mode auto.
+		if ($mode === 'auto' || $mode === 'inprocess') {
+			$r = $this->injectInProcess($pdfPath, $xmlPath, $modulePath);
+			if ($r['ok']) {
+				return $r;
+			}
+			$errors[] = 'in-process: '.$r['error'];
+			if ($mode === 'inprocess') {
+				return array('ok' => false, 'method' => 'inprocess', 'error' => implode(' | ', $errors));
+			}
+			// mode auto : on tente le repli sous-process ci-dessous.
+		}
+
+		// Sous-process : mode forcé OU repli automatique du mode auto.
+		$r = $this->injectSubprocess($pdfPath, $xmlPath, $modulePath);
+		if ($r['ok']) {
+			return $r;
+		}
+		$errors[] = 'sous-process: '.$r['error'];
+		return array('ok' => false, 'method' => 'subprocess', 'error' => implode(' | ', $errors));
+	}
+
+	/**
+	 * Injection IN-PROCESS : appelle directement la lib d'injection dans le
+	 * process web courant, sans exec(). Validé sans conflit FPDF/TCPDF (le PDF
+	 * facture utilise TCPDF, la lib un FPDF setasign qui cohabite). Écriture
+	 * atomique. Ne lève jamais : retourne le statut.
+	 *
+	 * @param string $pdfPath
+	 * @param string $xmlPath
+	 * @param string $modulePath
+	 * @return array{ok:bool,method:string,error:string}
+	 */
+	protected function injectInProcess($pdfPath, $xmlPath, $modulePath)
+	{
+		try {
+			$pdfContent = @file_get_contents($pdfPath);
+			$xmlContent = @file_get_contents($xmlPath);
+			if ($pdfContent === false || $xmlContent === false) {
+				return array('ok' => false, 'method' => 'inprocess', 'error' => 'lecture des fichiers source impossible');
+			}
+
+			// Garantit un minimum mémoire pour le parsing PDF en mémoire
+			// (best-effort, ne baisse jamais une limite déjà plus haute).
+			$this->ensureMemoryLimit(256 * 1024 * 1024);
+
+			require_once $modulePath.'/vendor/autoload.php';
+			if (!class_exists('\\Atgp\\FacturX\\Writer')) {
+				return array('ok' => false, 'method' => 'inprocess', 'error' => 'lib d\'injection introuvable (vendor manquant ?)');
+			}
+
+			// AFRelationship 'Alternative' : imposé par la spec pour EN16931
+			// (cf scripts/inject_facturx.php).
+			$writer = new \Atgp\FacturX\Writer();
+			$facturxPdf = $writer->generate($pdfContent, $xmlContent, 'en16931', false, array(), false, 'Alternative');
+			if (!is_string($facturxPdf) || $facturxPdf === '') {
+				return array('ok' => false, 'method' => 'inprocess', 'error' => 'sortie d\'injection vide');
+			}
+
+			// Écriture atomique : le PDF d'origine n'est remplacé qu'une fois le
+			// nouveau fichier intégralement écrit.
+			$tmpPath = $pdfPath.'.facturx.tmp';
+			if (file_put_contents($tmpPath, $facturxPdf) !== strlen($facturxPdf)) {
+				@unlink($tmpPath);
+				return array('ok' => false, 'method' => 'inprocess', 'error' => 'écriture du PDF de sortie impossible');
+			}
+			if (!@rename($tmpPath, $pdfPath)) {
+				@unlink($tmpPath);
+				return array('ok' => false, 'method' => 'inprocess', 'error' => 'remplacement du PDF impossible');
+			}
+
+			return array('ok' => true, 'method' => 'inprocess', 'error' => '');
+		} catch (\Throwable $e) {
+			return array('ok' => false, 'method' => 'inprocess', 'error' => $e->getMessage());
+		}
+	}
+
+	/**
+	 * Injection via SOUS-PROCESS PHP CLI (comportement historique, isolé du
+	 * process web). Nécessite exec() et un binaire PHP CLI valide.
+	 *
+	 * @param string $pdfPath
+	 * @param string $xmlPath
+	 * @param string $modulePath
+	 * @return array{ok:bool,method:string,error:string}
+	 */
+	protected function injectSubprocess($pdfPath, $xmlPath, $modulePath)
+	{
+		if (!function_exists('exec')) {
+			return array('ok' => false, 'method' => 'subprocess', 'error' => lemonfacturx_trans('LemonFacturXErrNoExec'));
+		}
+		$phpBin = $this->resolvePhpBinary(0);
+		if ($phpBin === null) {
+			return array('ok' => false, 'method' => 'subprocess', 'error' => 'binaire PHP CLI introuvable');
+		}
+
+		$cmd  = escapeshellarg($phpBin);
+		$cmd .= ' '.escapeshellarg($modulePath.'/scripts/inject_facturx.php');
+		$cmd .= ' '.escapeshellarg($pdfPath);
+		$cmd .= ' '.escapeshellarg($xmlPath);
+		$cmd .= ' 2>&1';
+
+		$output = array();
+		$rc = 0;
+		exec($cmd, $output, $rc);
+		if ($rc !== 0) {
+			return array('ok' => false, 'method' => 'subprocess', 'error' => dol_trunc(implode(' ', $output), 300));
+		}
+		return array('ok' => true, 'method' => 'subprocess', 'error' => '');
+	}
+
+	/**
+	 * Relève (best-effort) memory_limit au minimum demandé, sans jamais la
+	 * baisser. No-op si la limite est illimitée (-1) ou si ini_set est bridé.
+	 *
+	 * @param int $minBytes
+	 * @return void
+	 */
+	protected function ensureMemoryLimit($minBytes)
+	{
+		$cur = @ini_get('memory_limit');
+		if ($cur === false || $cur === '' || (string) $cur === '-1') {
+			return; // illimité ou inconnu : on ne touche à rien
+		}
+		$val = trim($cur);
+		$unit = strtolower(substr($val, -1));
+		$num = (float) $val;
+		$bytes = $num;
+		if ($unit === 'g') {
+			$bytes = $num * 1024 * 1024 * 1024;
+		} elseif ($unit === 'm') {
+			$bytes = $num * 1024 * 1024;
+		} elseif ($unit === 'k') {
+			$bytes = $num * 1024;
+		}
+		if ($bytes > 0 && $bytes < $minBytes) {
+			@ini_set('memory_limit', (string) $minBytes);
+		}
 	}
 
 	/**

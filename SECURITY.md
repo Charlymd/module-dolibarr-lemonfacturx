@@ -54,23 +54,26 @@ LemonFacturX est un module Dolibarr qui convertit automatiquement les PDF factur
 
 ## Protections en place
 
-### Exécution d'un subprocess PHP (`exec`)
+### Injection PDF : in-process par défaut, `exec()` optionnel
 
-Le module lance un subprocess CLI pour éviter un conflit de classes entre FPDF (utilisé par `atgp/factur-x`) et TCPDF (utilisé par Dolibarr). Le binaire est configurable via la constante `LEMONFACTURX_PHP_CLI_PATH`.
+Par défaut (constante `LEMONFACTURX_INJECTION_MODE` = `auto` ou `inprocess`), l'injection du XML dans le PDF se fait **in-process**, dans la requête web, **sans aucun appel système** (`exec`, `shell_exec`, etc.) :
 
-Protections :
+- **Aucune dépendance à `exec()`** : le module fonctionne sur les hébergements durcis qui désactivent les fonctions d'exécution de commandes (`disable_functions`), et n'incite jamais à réactiver une fonction sensible — surface d'attaque réduite.
+- L'injection appelle directement la lib `atgp/factur-x`. Le conflit de classes historiquement craint entre son FPDF (`setasign`) et le TCPDF de Dolibarr **n'a pas lieu** : ce sont deux classes distinctes qui cohabitent dans le même process (vérifié).
+
+Le mode `subprocess` (optionnel, ou repli automatique du mode `auto` si l'in-process échoue) lance un sous-process PHP CLI isolé. Le binaire est configurable via `LEMONFACTURX_PHP_CLI_PATH`. Quand ce mode est utilisé, les protections suivantes s'appliquent :
 
 - `escapeshellarg()` est appliqué sur **tous** les tokens de la commande (binaire PHP, script, PDF, fichier XML temporaire). Une valeur piégée dans la constante est quotée, et le shell cherche un binaire avec ce nom littéral qui n'existe pas → `command not found`. Pas de chaînage de commandes possible.
-- Validation par regex `^[A-Za-z0-9/._:() \\-]+$` sur `LEMONFACTURX_PHP_CLI_PATH` avant l'appel (`: \ ( )` et espace autorisés pour les chemins Windows). Toute valeur contenant des caractères exotiques (`;`, `&`, `$`, guillemets, etc.) est refusée avec un message d'erreur clair.
+- Validation par regex `^[A-Za-z0-9/._:() \\-]+$` sur `LEMONFACTURX_PHP_CLI_PATH` avant l'appel (`: \ ( )` et espace autorisés pour les chemins Windows). Toute valeur contenant des caractères exotiques (`;`, `&`, `$`, guillemets, etc.) est refusée.
 - Si le chemin est absolu, `is_executable()` vérifie qu'un exécutable existe effectivement.
-- `function_exists('exec')` est testé en amont (certains hébergeurs désactivent `exec`).
+- `function_exists('exec')` est testé en amont.
 - Le script CLI `inject_facturx.php` refuse tout appel via HTTP : `if (php_sapi_name() !== 'cli') { http_response_code(403); die(...); }`
 
 ### Manipulation de fichiers
 
 - Le PDF source provient du flux interne Dolibarr (hook `afterPDFCreation`), pas d'un upload direct.
-- Les fichiers XML temporaires sont créés via `tempnam(DOL_DATA_ROOT.'/facturx/temp', 'facturx_')` (toujours dans l'`open_basedir` Dolibarr, permissions 0600, nom imprévisible) puis supprimés en bloc `finally` après l'exec.
-- L'écriture du PDF Factur-X par le subprocess est **atomique** : écriture dans un fichier `.facturx.tmp` puis `rename()` — un crash, un disque plein ou un kill ne peut pas laisser un PDF tronqué.
+- Les fichiers XML temporaires sont créés via `tempnam(DOL_DATA_ROOT.'/facturx/temp', 'facturx_')` (toujours dans l'`open_basedir` Dolibarr, permissions 0600, nom imprévisible) puis supprimés en bloc `finally` après l'injection.
+- L'écriture du PDF Factur-X est **atomique** quel que soit le mode (in-process comme subprocess) : écriture dans un fichier `.facturx.tmp` puis `rename()` — un crash, un disque plein ou un kill ne peut pas laisser un PDF tronqué.
 - Aucun path fourni par l'utilisateur n'est utilisé en lecture/écriture.
 
 ### Génération XML

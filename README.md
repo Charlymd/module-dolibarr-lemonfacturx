@@ -10,7 +10,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 - **Dolibarr** 19.0 → 23.x — vérifié à l'activation (`need_dolibarr_version`)
 - **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
-- **Fonction `exec()`** activée (subprocess d'injection PDF) — vérifiée par le diagnostic
+- **Aucune fonction `exec()` requise** : l'injection PDF se fait **in-process** par défaut, ce qui fonctionne sur les hébergements mutualisés où `exec()` est désactivé (`disable_functions`). Le mode est réglable (`LEMONFACTURX_INJECTION_MODE` : `auto` / `inprocess` / `subprocess`) — voir la section Injection.
 - **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
 
 ## Installation
@@ -93,8 +93,20 @@ Le module se branche sur le hook `afterPDFCreation` (contexte `pdfgeneration`). 
 2. **Vérification** des infos obligatoires (vendeur, acheteur, IBAN, police PDF/A) — warnings consolidés
 3. **Génération du XML** CrossIndustryInvoice EN16931 avec les données de la facture Dolibarr
 4. **Validation interne** : well-formed + XSD EN16931 + **règles métier BR-\*** (sous-ensemble Schematron en PHP)
-5. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (subprocess séparé, écriture atomique, `AFRelationship=Alternative`)
+5. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (in-process par défaut, écriture atomique, `AFRelationship=Alternative`)
 6. **Post-validation veraPDF** optionnelle (PDF/A-3b)
+
+#### Mode d'injection (`LEMONFACTURX_INJECTION_MODE`)
+
+L'injection ne nécessite **aucune fonction système** par défaut :
+
+| Mode | Comportement |
+|------|--------------|
+| `auto` (défaut) | Injection **in-process** ; en cas d'échec, repli automatique sur le sous-process si `exec()` est disponible |
+| `inprocess` | Injection in-process **uniquement** — jamais d'`exec()` (hébergements durcis) |
+| `subprocess` | Sous-process PHP CLI **uniquement** (comportement historique, isolé du process web ; nécessite `exec()`) |
+
+L'in-process appelle la lib d'injection directement dans la requête web. Aucun conflit avec le TCPDF de Dolibarr : la lib utilise un FPDF `setasign` qui cohabite. Réglable dans **Configuration → bloc « Technique »**.
 
 Sur la **fiche facture** (facture validée), deux boutons :
 - **Vérifier Factur-X** : extrait le XML embarqué du PDF et le revalide (XSD + règles métier) — à utiliser avant envoi
@@ -103,8 +115,8 @@ Sur la **fiche facture** (facture validée), deux boutons :
 ### Sécurité
 
 - Scripts CLI (`scripts/`, `tests/`, `demo/`) protégés par `PHP_SAPI === 'cli'` **et** `.htaccess` `Require all denied`
-- `exec()` vérifié avant appel, binaire PHP CLI configurable via `LEMONFACTURX_PHP_CLI_PATH`, chemin validé par regex et `is_executable()` si absolu
-- Écriture **atomique** du PDF par le subprocess (fichier temporaire + `rename()`)
+- **Aucune dépendance à `exec()`** par défaut (injection in-process) → surface d'attaque réduite et compatibilité avec les serveurs durcis. Le mode `subprocess` (optionnel) vérifie `exec()` avant appel, binaire PHP CLI configurable via `LEMONFACTURX_PHP_CLI_PATH`, chemin validé par regex et `is_executable()` si absolu
+- Écriture **atomique** du PDF (fichier temporaire + `rename()`), quel que soit le mode
 - Validation XML interne avant injection PDF (well-formed + XSD EN16931 + règles métier)
 - Mode `LEMONFACTURX_STRICT_MODE` : choisir fail-open (best-effort) vs fail-closed (strict)
 - CSRF sur le POST admin et sur les actions de la fiche facture (`currentToken()`)
@@ -247,11 +259,12 @@ Toutes sont configurables via l'écran d'administration du module (**Accueil > C
 | `LEMONFACTURX_BT23_PROCESS` | string | *(vide)* | BT-23 cadre de facturation (A1 Chorus B2G, B1/S1/S2 réforme), vide = omis |
 | `LEMONFACTURX_STRICT_MODE` | int | 0 | 0 = best-effort (défaut), 1 = strict (voir ci-dessous) |
 | `LEMONFACTURX_BR_CHECK` | int | 1 | Contrôle interne des règles métier EN16931 avant injection |
-| `LEMONFACTURX_PHP_CLI_PATH` | string | php | Chemin vers le binaire PHP CLI (voir note ci-dessous) |
+| `LEMONFACTURX_INJECTION_MODE` | string | auto | Mode d'injection : `auto` (in-process + repli sous-process), `inprocess` (sans exec), `subprocess` (exec uniquement) |
+| `LEMONFACTURX_PHP_CLI_PATH` | string | *(vide)* | Chemin du binaire PHP CLI, utilisé **uniquement** par le mode `subprocess` (vide = auto-détection ; voir note ci-dessous) |
 | `LEMONFACTURX_VERAPDF_PATH` | string | *(vide)* | Chemin veraPDF : post-validation PDF/A-3b de chaque PDF généré (non bloquant) |
 | `LEMONFACTURX_NOTE_PMD/PMT/AAB` | text | mentions FR | Mentions légales BR-FR-05 (le texte par défaut s'applique si le champ est laissé vide) |
 
-> **Note PHP CLI** : Le subprocess d'injection utilise `php` par défaut. Sur les serveurs avec plusieurs versions de PHP, ou si `php` n'est pas dans le PATH, configurer `LEMONFACTURX_PHP_CLI_PATH` avec le chemin complet (ex: `/usr/bin/php8.2`). Ne **pas** utiliser `PHP_BINARY` : en contexte php-fpm, cette constante pointe vers le binaire fpm et non le CLI.
+> **Note PHP CLI** : pertinente **uniquement en mode `subprocess`** (l'injection par défaut est in-process et n'utilise aucun binaire externe). Dans ce mode, le module auto-détecte le bon binaire PHP CLI. Sur les serveurs avec plusieurs versions de PHP, ou si l'auto-détection échoue, configurer `LEMONFACTURX_PHP_CLI_PATH` avec le chemin complet (ex: `/usr/bin/php8.2`). Ne **pas** utiliser `PHP_BINARY` : en contexte php-fpm, cette constante pointe vers le binaire fpm et non le CLI.
 
 > **Note prélèvement SEPA (59)** : le module publie l'ICS créancier (constante Dolibarr `PRELEVEMENT_ICS`, BT-90), la RUM du mandat (RIB par défaut du tiers, BT-89) et l'IBAN débiteur (BT-91). Des warnings signalent les données manquantes.
 
