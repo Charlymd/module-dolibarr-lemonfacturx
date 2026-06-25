@@ -1436,20 +1436,29 @@ function lemonfacturx_append_notes_to_footer($db, $overwrite = null)
 			$mentions[] = $m;
 		}
 	}
+	// On centre les mentions sur le PDF (HTML), cohérent avec la « Mention
+	// complémentaire » qui est rendue en HTML et souvent déjà centrée.
+	$wrap = static function ($m) {
+		return '<p style="text-align:center;margin:0;">'.$m.'</p>';
+	};
 	$added = 0;
 	if ($overwrite || trim($freeText) === '') {
 		// Champ vide OU option « écraser » : on (re)met nos mentions.
-		$newText = implode("\n", $mentions);
+		$parts = array();
+		foreach ($mentions as $m) {
+			$parts[] = $wrap($m);
+		}
+		$newText = implode("\n", $parts);
 		$added = ($newText !== $freeText) ? count($mentions) : 0;
 	} else {
 		// On AJOUTE nos mentions après le texte existant (seulement celles
-		// qui manquent), sans toucher au reste.
+		// qui manquent — on teste le texte brut), sans toucher au reste.
 		$newText = $freeText;
 		foreach ($mentions as $m) {
 			if (strpos($newText, $m) !== false) {
 				continue;
 			}
-			$newText = rtrim($newText)."\n".$m;
+			$newText = rtrim($newText)."\n".$wrap($m);
 			$added++;
 		}
 	}
@@ -1473,6 +1482,59 @@ function lemonfacturx_append_notes_to_footer($db, $overwrite = null)
 function lemonfacturx_invoice_freetext_const()
 {
 	return 'INVOICE_FREE_TEXT';
+}
+
+/**
+ * Liste les polices PDF disponibles dans le TCPDF de Dolibarr, avec pour chacune
+ * si elle est conforme Factur-X (PDF/A-3 = police EMBARQUÉE).
+ *
+ * Détection (calibrée sur les définitions TCPDF) : une police est embarquée si
+ * son $type n'est PAS 'core' (base-14 non embarquée) ET qu'elle a un $file
+ * (programme de police embarqué, ex 'dejavusans.z', 'pdfahelvetica.z').
+ *
+ * On ne renvoie que les polices « régulières » : les variantes gras/italique
+ * (suffixe b / i / bi) sont écartées car TCPDF les sélectionne automatiquement
+ * à partir de la police de base posée dans MAIN_PDF_FORCE_FONT.
+ *
+ * Chemin TCPDF stable de Dolibarr 18 à 23. Renvoie array(nomPolice => bool
+ * embarquée), trié, ou array() si le dossier est introuvable.
+ *
+ * @return array
+ */
+function lemonfacturx_list_pdf_fonts()
+{
+	$dir = DOL_DOCUMENT_ROOT.'/includes/tecnickcom/tcpdf/fonts/';
+	if (!is_dir($dir)) {
+		return array();
+	}
+	$fonts = array();
+	$files = glob($dir.'*.php');
+	if (!is_array($files)) {
+		return array();
+	}
+	foreach ($files as $path) {
+		$name = basename($path, '.php');
+		// Écarter les variantes gras/italique (b / i / bi) d'une police de base.
+		$base = preg_replace('/(bi|b|i)$/', '', $name);
+		if ($base !== $name && file_exists($dir.$base.'.php')) {
+			continue;
+		}
+		$content = @file_get_contents($path);
+		if ($content === false) {
+			continue;
+		}
+		$type = '';
+		$file = '';
+		if (preg_match('/\$type\s*=\s*\'([^\']*)\'/', $content, $m)) {
+			$type = $m[1];
+		}
+		if (preg_match('/\$file\s*=\s*\'([^\']*)\'/', $content, $m)) {
+			$file = $m[1];
+		}
+		$fonts[$name] = ($type !== '' && $type !== 'core' && $file !== '');
+	}
+	ksort($fonts);
+	return $fonts;
 }
 
 /**

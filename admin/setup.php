@@ -81,6 +81,18 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		$footerAdded = lemonfacturx_append_notes_to_footer($db, GETPOSTINT('LEMONFACTURX_NOTES_OVERWRITE') === 1);
 	}
 
+	// Police du PDF (constante globale Dolibarr MAIN_PDF_FORCE_FONT). On la pose
+	// en visible=1 pour qu'elle reste gérable (Config > Divers ET ce menu). Vide
+	// = on retire le forçage (police par défaut Dolibarr). On valide la valeur
+	// contre la liste réelle des polices pour ne rien poser d'invalide.
+	if (!$error) {
+		$pdfFont = GETPOST('MAIN_PDF_FORCE_FONT', 'alpha');
+		$availableFonts = lemonfacturx_list_pdf_fonts();
+		if ($pdfFont === '' || isset($availableFonts[$pdfFont])) {
+			dolibarr_set_const($db, 'MAIN_PDF_FORCE_FONT', $pdfFont, 'chaine', 1, '', $conf->entity);
+		}
+	}
+
 	if (!$error) {
 		$msg = $langs->trans("SetupSaved");
 		if ($footerAdded > 0) {
@@ -98,7 +110,7 @@ if ($action == 'setforcefont') {
 	if (GETPOST('token', 'alpha') !== currentToken()) {
 		accessforbidden('Bad value for CSRF token');
 	}
-	if (dolibarr_set_const($db, 'MAIN_PDF_FORCE_FONT', 'pdfahelvetica', 'chaine', 0, '', $conf->entity) > 0) {
+	if (dolibarr_set_const($db, 'MAIN_PDF_FORCE_FONT', 'pdfahelvetica', 'chaine', 1, '', $conf->entity) > 0) {
 		setEventMessages($langs->trans("LemonFacturXForceFontSet"), null, 'mesgs');
 	} else {
 		setEventMessages($langs->trans("Error"), null, 'errors');
@@ -199,6 +211,24 @@ $strict = getDolGlobalInt('LEMONFACTURX_STRICT_MODE', 0);
 print '<select name="LEMONFACTURX_STRICT_MODE" class="flat">';
 print '<option value="0"'.($strict == 0 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeBestEffort").'</option>';
 print '<option value="1"'.($strict == 1 ? ' selected' : '').'>'.$langs->trans("LemonFacturXStrictModeStrict").'</option>';
+print '</select></td></tr>';
+
+// Police du PDF (MAIN_PDF_FORCE_FONT) : liste les polices du Dolibarr, marquées
+// conformes Factur-X (embarquées ✓) ou non (base-14 ⚠). Conformes en premier.
+print '<tr class="oddeven"><td>'.$langs->trans("LemonFacturXPdfFont").'<br><span class="opacitymedium small">'.$langs->trans("LemonFacturXPdfFontHint").'</span></td><td>';
+$curFont = getDolGlobalString('MAIN_PDF_FORCE_FONT', '');
+$pdfFonts = lemonfacturx_list_pdf_fonts();
+print '<select name="MAIN_PDF_FORCE_FONT" class="flat minwidth300">';
+print '<option value="">'.$langs->trans("LemonFacturXPdfFontDefault").'</option>';
+foreach (array(true, false) as $wantEmbedded) {
+	foreach ($pdfFonts as $fname => $isEmbedded) {
+		if ($isEmbedded !== $wantEmbedded) {
+			continue;
+		}
+		$tag = $isEmbedded ? $langs->trans("LemonFacturXPdfFontOk") : $langs->trans("LemonFacturXPdfFontKo");
+		print '<option value="'.dol_escape_htmltag($fname).'"'.($curFont === $fname ? ' selected' : '').'>'.dol_escape_htmltag($fname.' — '.$tag).'</option>';
+	}
+}
 print '</select></td></tr>';
 
 // ---- Bloc 5 : Technique (avancé) ----
