@@ -108,9 +108,14 @@ Toutes les constantes du module sont stockées en clair dans `llx_const` (conven
 | `LEMONFACTURX_PAYMENT_MEANS` | Code moyen de paiement UNTDID 4461 |
 | `LEMONFACTURX_STRICT_MODE` | Politique erreur (best-effort / strict) |
 | `LEMONFACTURX_BR_CHECK` | Contrôle interne des règles métier EN16931 |
+| `LEMONFACTURX_INJECTION_MODE` | Mode d'injection XML (auto / in-process / sous-process) |
 | `LEMONFACTURX_PHP_CLI_PATH` | Chemin du binaire PHP (validé par regex) |
 | `LEMONFACTURX_VERAPDF_PATH` | Chemin du binaire veraPDF (optionnel, `is_executable()` vérifié) |
+| `LEMONFACTURX_ENDPOINT_SUFFIX_SELLER` | Suffixe ajouté au SIREN vendeur dans l'endpoint BT-34 |
 | `LEMONFACTURX_NOTE_PMD/PMT/AAB` | Mentions légales BR-FR-05 |
+| `LEMONFACTURX_NOTES_IN_FOOTER` | Recopie des mentions BR-FR-05 dans le pied de facture (flag) |
+| `LEMONFACTURX_NOTES_OVERWRITE` | Recopie pied : écraser (1) ou ajouter à la suite (0) |
+| `LEMONFACTURX_CHORUS_ENABLED` | Flag d'activation des fonctionnalités Chorus Pro |
 | `LEMONFACTURX_UPDATE_CHECK_CACHE` | JSON cache de la dernière version GitHub (TTL 24h, succès et échecs) |
 
 ## Dépendances vendored
