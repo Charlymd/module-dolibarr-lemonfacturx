@@ -380,18 +380,28 @@ if (trim($freeTextDiag) === '') {
 	$diagOk[] = $langs->trans("LemonFacturXDiagFreeTextOk");
 }
 
-// Diagnostic d'injection, dépendant du mode choisi. En mode in-process (défaut
-// et 'inprocess'), exec() n'est PAS requis → un serveur qui le désactive est
-// parfaitement OK (cas des mutualisés durcis). exec()/PHP CLI ne sont des
-// prérequis que pour le mode 'subprocess' (ou le repli du mode 'auto').
+// Diagnostic d'injection, dépendant du mode choisi. L'injection in-process n'a
+// lieu qu'en mode 'inprocess' (forcé) ou en mode 'auto' sur un serveur SANS
+// exec() → là, exec()/PHP CLI ne sont pas requis (mutualisés durcis). Sinon
+// (mode 'auto' avec exec, ou mode 'subprocess'), c'est le sous-process — process
+// PHP isolé, le chemin le plus sûr — qui injecte : exec() + PHP CLI valide requis.
 $diagInjMode = strtolower(trim(getDolGlobalString('LEMONFACTURX_INJECTION_MODE', 'auto')));
 if (!in_array($diagInjMode, ['auto', 'inprocess', 'subprocess'], true)) {
 	$diagInjMode = 'auto';
 }
 $execAvailable = function_exists('exec');
+// tcpdi actif (défaut Dolibarr) = un « class FPDF extends TCPDF » est chargé à
+// chaque génération PDF (pdf_getInstance) → incompatible avec l'injection
+// in-process. MAIN_DISABLE_TCPDI=1 désactive ce moteur (et la fusion PDF de
+// Dolibarr) mais débloque l'in-process.
+$tcpdiActive = !getDolGlobalString('MAIN_DISABLE_TCPDI');
 
 if ($diagInjMode === 'inprocess') {
-	$diagOk[] = $langs->trans("LemonFacturXDiagInjInProcess");
+	if ($tcpdiActive) {
+		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagTcpdiConflict"), 'fix' => '/admin/const.php'];
+	} else {
+		$diagOk[] = $langs->trans("LemonFacturXDiagInjInProcess");
+	}
 } elseif ($diagInjMode === 'subprocess') {
 	if (!$execAvailable) {
 		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagExecRequiredSub"), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
@@ -399,9 +409,14 @@ if ($diagInjMode === 'inprocess') {
 		$diagOk[] = $langs->trans("LemonFacturXDiagInjSubprocess");
 	}
 } else { // auto
-	$diagOk[] = $execAvailable
-		? $langs->trans("LemonFacturXDiagInjAuto")
-		: $langs->trans("LemonFacturXDiagInjAutoNoExec");
+	if ($execAvailable) {
+		$diagOk[] = $langs->trans("LemonFacturXDiagInjAuto");
+	} elseif ($tcpdiActive) {
+		// auto sans exec → in-process, mais tcpdi actif → échec garanti : on guide.
+		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagTcpdiConflict"), 'fix' => '/admin/const.php'];
+	} else {
+		$diagOk[] = $langs->trans("LemonFacturXDiagInjAutoNoExec");
+	}
 }
 
 // Binaire PHP CLI : pertinent uniquement quand le sous-process peut servir
@@ -414,12 +429,10 @@ if ($execAvailable && $diagInjMode !== 'inprocess') {
 	$phpCliLabel = $phpCliResolved.($phpCliIsAuto ? ' ('.$langs->trans("LemonFacturXDiagPhpCliAuto").')' : '');
 	if (lemonfacturx_php_cli_is_valid($phpCliResolved)) {
 		$diagOk[] = $langs->trans("LemonFacturXDiagPhpCliOk").' : '.dol_escape_htmltag($phpCliLabel);
-	} elseif ($diagInjMode === 'subprocess') {
-		// En sous-process pur, un CLI invalide est bloquant.
-		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", dol_escape_htmltag($phpCliResolved)), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
 	} else {
-		// En auto, le CLI ne sert qu'au repli → simple info (in-process couvre).
-		$diagOk[] = $langs->trans("LemonFacturXDiagPhpCliFallbackOnly");
+		// Mode subprocess OU auto-avec-exec : le sous-process est le chemin
+		// d'injection effectif → un CLI invalide est bloquant.
+		$diagErrors[] = ['msg' => $langs->trans("LemonFacturXDiagPhpCliNotFound", dol_escape_htmltag($phpCliResolved)), 'fix' => '/custom/lemonfacturx/admin/setup.php'];
 	}
 }
 

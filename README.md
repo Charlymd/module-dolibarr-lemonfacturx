@@ -10,7 +10,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 - **Dolibarr** 19.0 → 23.x — vérifié à l'activation (`need_dolibarr_version`)
 - **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
-- **Aucune fonction `exec()` requise** : l'injection PDF se fait **in-process** par défaut, ce qui fonctionne sur les hébergements mutualisés où `exec()` est désactivé (`disable_functions`). Le mode est réglable (`LEMONFACTURX_INJECTION_MODE` : `auto` / `inprocess` / `subprocess`) — voir la section Injection.
+- **Fonction `exec()`** : utilisée par défaut pour l'injection PDF (sous-process PHP isolé, le chemin le plus robuste). **Pas strictement obligatoire** : si `exec()` est désactivé (`disable_functions`, hébergements mutualisés durcis), le module bascule automatiquement en injection **in-process**. Le mode est réglable (`LEMONFACTURX_INJECTION_MODE` : `auto` / `inprocess` / `subprocess`) — voir la section Injection.
 - **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
 
 ## Installation
@@ -93,20 +93,18 @@ Le module se branche sur le hook `afterPDFCreation` (contexte `pdfgeneration`). 
 2. **Vérification** des infos obligatoires (vendeur, acheteur, IBAN, police PDF/A) — warnings consolidés
 3. **Génération du XML** CrossIndustryInvoice EN16931 avec les données de la facture Dolibarr
 4. **Validation interne** : well-formed + XSD EN16931 + **règles métier BR-\*** (sous-ensemble Schematron en PHP)
-5. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (in-process par défaut, écriture atomique, `AFRelationship=Alternative`)
+5. **Injection** du XML dans le PDF via la lib `atgp/factur-x` (sous-process isolé par défaut, in-process si `exec()` indisponible ; écriture atomique, `AFRelationship=Alternative`)
 6. **Post-validation veraPDF** optionnelle (PDF/A-3b)
 
 #### Mode d'injection (`LEMONFACTURX_INJECTION_MODE`)
 
-L'injection ne nécessite **aucune fonction système** par défaut :
-
 | Mode | Comportement |
 |------|--------------|
-| `auto` (défaut) | Injection **in-process** ; en cas d'échec, repli automatique sur le sous-process si `exec()` est disponible |
-| `inprocess` | Injection in-process **uniquement** — jamais d'`exec()` (hébergements durcis) |
-| `subprocess` | Sous-process PHP CLI **uniquement** (comportement historique, isolé du process web ; nécessite `exec()`) |
+| `auto` (défaut) | **Sous-process** si `exec()` est disponible (process PHP isolé, aucun risque de conflit de bibliothèques) ; **in-process** uniquement si `exec()` est désactivé (hébergements mutualisés durcis) |
+| `inprocess` | Injection in-process **uniquement** — jamais d'`exec()`. À réserver aux serveurs sans `exec()` : un conflit de versions FPDF/FPDI avec un autre module peut empêcher l'injection (le module détecte ce cas et conserve le PDF classique) |
+| `subprocess` | Sous-process PHP CLI **uniquement** (comportement historique ; nécessite `exec()`) |
 
-L'in-process appelle la lib d'injection directement dans la requête web. Aucun conflit avec le TCPDF de Dolibarr : la lib utilise un FPDF `setasign` qui cohabite. Réglable dans **Configuration → bloc « Technique »**.
+**Pourquoi le sous-process par défaut** : l'in-process charge la lib d'injection (`setasign/fpdi` + `setasign/fpdf`) dans la requête web, où un autre composant (le `tcpdi` de Dolibarr, un autre module) peut avoir déjà chargé une version **incompatible** de FPDF → erreur fatale de compilation non rattrapable. Le sous-process tourne dans un process PHP vierge, sans conflit possible. Réglable dans **Configuration → bloc « Technique »**.
 
 Sur la **fiche facture** (facture validée), deux boutons :
 - **Vérifier Factur-X** : extrait le XML embarqué du PDF et le revalide (XSD + règles métier) — à utiliser avant envoi
@@ -115,7 +113,7 @@ Sur la **fiche facture** (facture validée), deux boutons :
 ### Sécurité
 
 - Scripts CLI (`scripts/`, `tests/`, `demo/`) protégés par `PHP_SAPI === 'cli'` **et** `.htaccess` `Require all denied`
-- **Aucune dépendance à `exec()`** par défaut (injection in-process) → surface d'attaque réduite et compatibilité avec les serveurs durcis. Le mode `subprocess` (optionnel) vérifie `exec()` avant appel, binaire PHP CLI configurable via `LEMONFACTURX_PHP_CLI_PATH`, chemin validé par regex et `is_executable()` si absolu
+- **`exec()` non obligatoire** : sur un hébergement durci qui le désactive, le module bascule en injection in-process et reste fonctionnel (compatibilité mutualisés). Quand le sous-process est utilisé (cas par défaut), la commande est protégée : `escapeshellarg()` sur tous les tokens, binaire PHP CLI configurable via `LEMONFACTURX_PHP_CLI_PATH`, validé par regex et `is_executable()` si absolu
 - Écriture **atomique** du PDF (fichier temporaire + `rename()`), quel que soit le mode
 - Validation XML interne avant injection PDF (well-formed + XSD EN16931 + règles métier)
 - Mode `LEMONFACTURX_STRICT_MODE` : choisir fail-open (best-effort) vs fail-closed (strict)

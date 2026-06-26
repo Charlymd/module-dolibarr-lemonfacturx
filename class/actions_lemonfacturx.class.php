@@ -602,28 +602,26 @@ class ActionsLemonFacturX
 			$mode = 'auto';
 		}
 
-		$errors = array();
-
-		// In-process : mode par défaut et 1re tentative du mode auto.
-		if ($mode === 'auto' || $mode === 'inprocess') {
-			$r = $this->injectInProcess($pdfPath, $xmlPath, $modulePath);
-			if ($r['ok']) {
-				return $r;
-			}
-			$errors[] = 'in-process: '.$r['error'];
-			if ($mode === 'inprocess') {
-				return array('ok' => false, 'method' => 'inprocess', 'error' => implode(' | ', $errors));
-			}
-			// mode auto : on tente le repli sous-process ci-dessous.
+		// Forçages explicites.
+		if ($mode === 'subprocess') {
+			return $this->injectSubprocess($pdfPath, $xmlPath, $modulePath);
+		}
+		if ($mode === 'inprocess') {
+			return $this->injectInProcess($pdfPath, $xmlPath, $modulePath);
 		}
 
-		// Sous-process : mode forcé OU repli automatique du mode auto.
-		$r = $this->injectSubprocess($pdfPath, $xmlPath, $modulePath);
-		if ($r['ok']) {
-			return $r;
+		// Mode AUTO. Le sous-process (process PHP isolé) est le chemin SÛR : aucun
+		// conflit de bibliothèques possible. L'in-process, lui, peut déclencher une
+		// FATAL NON RATTRAPABLE quand un autre composant (Dolibarr tcpdi, un autre
+		// module embarquant setasign/fpdi) a déjà chargé une version incompatible
+		// de FPDF/FPDI — c'est une erreur de COMPILATION que le try/catch ne capture
+		// pas (vu en prod : FpdfTplTrait::setPageFormat). On réserve donc l'in-process
+		// au SEUL cas où exec() est indisponible (mutualisé durci), là où il n'y a
+		// pas d'alternative.
+		if (function_exists('exec')) {
+			return $this->injectSubprocess($pdfPath, $xmlPath, $modulePath);
 		}
-		$errors[] = 'sous-process: '.$r['error'];
-		return array('ok' => false, 'method' => 'subprocess', 'error' => implode(' | ', $errors));
+		return $this->injectInProcess($pdfPath, $xmlPath, $modulePath);
 	}
 
 	/**
@@ -655,6 +653,16 @@ class ActionsLemonFacturX
 				return array('ok' => false, 'method' => 'inprocess', 'error' => 'lib d\'injection introuvable (vendor manquant ?)');
 			}
 
+			// Garde-fou anti-FATAL : si une classe FPDF/FPDI est déjà chargée par
+			// un AUTRE composant que notre vendor, instancier la lib d'injection
+			// déclencherait une erreur de COMPILATION non rattrapable (le
+			// try/catch ci-dessus ne la capturerait pas). On détecte et on sort
+			// proprement — en mode auto, l'appelant repassera par le sous-process.
+			$conflict = $this->detectInProcessPdfConflict($modulePath);
+			if ($conflict !== null) {
+				return array('ok' => false, 'method' => 'inprocess', 'error' => $conflict);
+			}
+
 			// AFRelationship 'Alternative' : imposé par la spec pour EN16931
 			// (cf scripts/inject_facturx.php).
 			$writer = new \Atgp\FacturX\Writer();
@@ -679,6 +687,61 @@ class ActionsLemonFacturX
 		} catch (\Throwable $e) {
 			return array('ok' => false, 'method' => 'inprocess', 'error' => $e->getMessage());
 		}
+	}
+
+	/**
+	 * Détecte si une classe FPDF/FPDI est déjà chargée par un composant AUTRE
+	 * que le vendor du module (le tcpdi de Dolibarr, un autre module embarquant
+	 * setasign/fpdi…). Dans ce cas, instancier la lib d'injection in-process
+	 * provoque une FATAL de compilation non rattrapable (« Declaration … must be
+	 * compatible », typiquement FpdfTplTrait::setPageFormat). On l'évite donc en
+	 * amont.
+	 *
+	 * @param string $modulePath
+	 * @return string|null  message de conflit, ou null si aucun conflit
+	 */
+	protected function detectInProcessPdfConflict($modulePath)
+	{
+		$ourVendor = str_replace('\\', '/', $modulePath).'/vendor/setasign/';
+
+		// Cas principal : la classe parente de notre FpdfTpl est la classe GLOBALE
+		// \FPDF. Or Dolibarr fournit lui aussi un \FPDF — includes/tcpdi/tcpdi.php :
+		// « class FPDF extends TCPDF {} ». On FORCE la résolution de \FPDF (autoload
+		// autorisé pour la PARENTE — surtout pas pour FpdfTpl/Fpdi, dont le
+		// chargement est justement ce qui déclencherait la fatale) et on regarde qui
+		// gagne l'autoload :
+		//  - notre setasign/fpdf            → in-process sûr (on laisse passer) ;
+		//  - le FPDF-sur-TCPDF de Dolibarr  → conflit garanti (setPageFormat
+		//    incompatible) → on renonce proprement à l'in-process.
+		if (class_exists('FPDF', true)) {
+			try {
+				$file = (new \ReflectionClass('FPDF'))->getFileName();
+			} catch (\Throwable $e) {
+				$file = false;
+			}
+			if ($file !== false && strpos(str_replace('\\', '/', $file), $ourVendor) === false) {
+				return function_exists('lemonfacturx_trans')
+					? lemonfacturx_trans('LemonFacturXErrTcpdiConflict', basename($file))
+					: 'Conflit FPDF/TCPDF (tcpdi de Dolibarr, '.basename($file).') : injection in-process impossible. Activez exec() (mode sous-process) ou posez MAIN_DISABLE_TCPDI=1.';
+			}
+		}
+
+		// Cas secondaire : une classe FPDI setasign déjà chargée par un AUTRE
+		// composant (autoload=false : on ne force PAS le chargement de ces enfants).
+		foreach (array('setasign\\Fpdi\\FpdfTpl', 'setasign\\Fpdi\\Fpdi') as $cls) {
+			if (!class_exists($cls, false)) {
+				continue;
+			}
+			try {
+				$file = (new \ReflectionClass($cls))->getFileName();
+			} catch (\Throwable $e) {
+				continue;
+			}
+			if ($file !== false && strpos(str_replace('\\', '/', $file), $ourVendor) === false) {
+				return $cls.' déjà chargé hors du vendor du module ('.basename($file).') : conflit FPDI, injection in-process impossible';
+			}
+		}
+		return null;
 	}
 
 	/**

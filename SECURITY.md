@@ -54,20 +54,17 @@ LemonFacturX est un module Dolibarr qui convertit automatiquement les PDF factur
 
 ## Protections en place
 
-### Injection PDF : in-process par défaut, `exec()` optionnel
+### Injection PDF : sous-process isolé par défaut
 
-Par défaut (constante `LEMONFACTURX_INJECTION_MODE` = `auto` ou `inprocess`), l'injection du XML dans le PDF se fait **in-process**, dans la requête web, **sans aucun appel système** (`exec`, `shell_exec`, etc.) :
-
-- **Aucune dépendance à `exec()`** : le module fonctionne sur les hébergements durcis qui désactivent les fonctions d'exécution de commandes (`disable_functions`), et n'incite jamais à réactiver une fonction sensible — surface d'attaque réduite.
-- L'injection appelle directement la lib `atgp/factur-x`. Le conflit de classes historiquement craint entre son FPDF (`setasign`) et le TCPDF de Dolibarr **n'a pas lieu** : ce sont deux classes distinctes qui cohabitent dans le même process (vérifié).
-
-Le mode `subprocess` (optionnel, ou repli automatique du mode `auto` si l'in-process échoue) lance un sous-process PHP CLI isolé. Le binaire est configurable via `LEMONFACTURX_PHP_CLI_PATH`. Quand ce mode est utilisé, les protections suivantes s'appliquent :
+Par défaut (mode `auto` avec `exec()` disponible), l'injection du XML dans le PDF se fait dans un **sous-process PHP isolé** (`scripts/inject_facturx.php`). C'est le chemin le plus robuste : le process est vierge — aucune classe Dolibarr ou tierce chargée — donc **aucun conflit de bibliothèques** possible. Le binaire PHP CLI est configurable via `LEMONFACTURX_PHP_CLI_PATH`. Protections de l'appel :
 
 - `escapeshellarg()` est appliqué sur **tous** les tokens de la commande (binaire PHP, script, PDF, fichier XML temporaire). Une valeur piégée dans la constante est quotée, et le shell cherche un binaire avec ce nom littéral qui n'existe pas → `command not found`. Pas de chaînage de commandes possible.
 - Validation par regex `^[A-Za-z0-9/._:() \\-]+$` sur `LEMONFACTURX_PHP_CLI_PATH` avant l'appel (`: \ ( )` et espace autorisés pour les chemins Windows). Toute valeur contenant des caractères exotiques (`;`, `&`, `$`, guillemets, etc.) est refusée.
 - Si le chemin est absolu, `is_executable()` vérifie qu'un exécutable existe effectivement.
 - `function_exists('exec')` est testé en amont.
 - Le script CLI `inject_facturx.php` refuse tout appel via HTTP : `if (php_sapi_name() !== 'cli') { http_response_code(403); die(...); }`
+
+**Injection in-process (sans `exec()`)** — utilisée uniquement si `exec()` est désactivé (mode `auto` sur mutualisé durci) ou explicitement forcée (mode `inprocess`). Elle charge la lib d'injection dans la requête web, ce qui retire la dépendance à `exec()` (utile sur un hébergement durci). Risque connu et **traité** : si un autre composant (le `tcpdi` de Dolibarr, un autre module embarquant `setasign/fpdi`) a déjà chargé une version **incompatible** de FPDF, l'instanciation déclencherait une erreur fatale de compilation (« Declaration … must be compatible », `FpdfTplTrait::setPageFormat`) — non rattrapable par `try/catch`. Le module **détecte ce conflit en amont** (contrôle des classes FPDF/FPDI déjà chargées hors de son propre vendor) et **renonce proprement** à l'in-process au lieu de provoquer la fatale ; le PDF classique est alors conservé. C'est la raison pour laquelle le sous-process reste le mode par défaut dès que `exec()` est disponible.
 
 ### Manipulation de fichiers
 
