@@ -1,6 +1,8 @@
 # LemonFacturX
 
-**Version 3.0.0** — Module Dolibarr pour la génération automatique de factures **Factur-X EN16931** (PDF/A-3 avec XML CrossIndustryInvoice embarqué).
+[![Dernière version](https://img.shields.io/github/v/release/hello-lemon/module-dolibarr-lemonfacturx?label=version&sort=semver)](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/releases/latest)
+
+Module Dolibarr pour la génération automatique de factures **Factur-X EN16931** (PDF/A-3 avec XML CrossIndustryInvoice embarqué).
 
 Chaque facture client générée dans Dolibarr est automatiquement convertie au format Factur-X, conforme aux règles **BR-FR** (norme XP Z12-012 V1.2.0) pour la facturation électronique française.
 
@@ -358,6 +360,66 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 ```
 
 ## Changelog
+
+### 3.7.1 (juin 2026)
+
+**Correctif de régression (à appliquer).** La 3.7.0 avait fait de l'injection in-process le mode par défaut, ce qui déclenche une erreur fatale `Declaration of FpdfTplTrait::setPageFormat must be compatible with TCPDF::setPageFormat` sur un Dolibarr standard : `pdf_getInstance()` charge le moteur `tcpdi` (`class FPDF extends TCPDF`) à chaque génération, et la lib d'injection FPDI en hérite alors → conflit de signature, génération de facture cassée. L'injection repasse par un **sous-process PHP isolé** dès qu'`exec()` est disponible (process vierge, aucun conflit possible — comportement d'avant la 3.7.0). L'in-process n'est tenté que si `exec()` est désactivé, avec un **garde-fou** qui conserve le PDF classique au lieu de planter, et un **diagnostic** qui indique la marche à suivre (activer `exec()`, ou poser `MAIN_DISABLE_TCPDI=1`).
+
+### 3.7.0 (juin 2026)
+
+Mode d'injection réglable (`LEMONFACTURX_INJECTION_MODE`) avec injection in-process sans `exec()`. **Ne pas utiliser tel quel — corrigé en 3.7.1** (conflit FPDF/TCPDF via le moteur `tcpdi` de Dolibarr).
+
+### 3.6.3 (juin 2026)
+
+Sélecteur de **police PDF** dans la configuration (compatibilité Factur-X indiquée pour chaque police) ; mentions légales BR-FR-05 centrées sur le PDF.
+
+### 3.6.2 (juin 2026)
+
+Recopie des mentions légales BR-FR-05 dans le pied de facture (`INVOICE_FREE_TEXT`) avec option « écraser » ; bouton pour reporter les champs Chorus dans la note publique de la facture.
+
+### 3.6.1 (juin 2026)
+
+Correctif : les champs Chorus n'apparaissent plus comme un bloc parasite dans le corps du PDF sous **Dolibarr 23** (`printable=0` forcé sur les extrafields Chorus).
+
+### 3.6.0 (juin 2026)
+
+Compatibilité **Dolibarr 23** (onglet et hooks Chorus), meilleures performances sur les factures en brouillon, suffixe d'endpoint vendeur (BT-34) pour l'adressage des Plateformes Agréées.
+
+### 3.5.1 (juin 2026)
+
+Correctif de la détection du binaire PHP CLI sous **Windows**.
+
+### 3.5.0 (juin 2026)
+
+Réglages simplifiés et **auto-détection du binaire PHP CLI** (plus de configuration manuelle dans le cas courant).
+
+### 3.4.0 (juin 2026)
+
+Support **Chorus Pro (B2G)** : génération d'un second PDF dédié au profil Chorus, sans jamais modifier le Factur-X standard.
+
+### 3.2.1 (juin 2026)
+
+SIREN lu depuis le champ SIREN de Dolibarr (`idprof1`) plutôt que dérivé du SIRET.
+
+### 3.2.0 (juin 2026)
+
+**SIRET et SIREN dans deux champs distincts** (SIRET → `ram:ID` 0009 BT-29/46, SIREN → `SpecifiedLegalOrganization` 0002 BT-30/47) — corrige le rejet au dépôt sur les Plateformes Agréées (BR-FR-10).
+
+### 3.1.0 (juin 2026)
+
+Mentions légales BR-FR-05 rendues visibles sur le PDF en un clic depuis la configuration.
+
+### 3.0.3 (juin 2026)
+
+Avertissement SIREN/routage : critère « non-assujetti à la TVA » complété pour ne plus signaler à tort certains tiers.
+
+### 3.0.2 (juin 2026)
+
+Correction en un clic de `MAIN_PDF_FORCE_FONT` depuis le diagnostic.
+
+### 3.0.1 (juin 2026)
+
+Plus d'avertissement SIREN pour les clients particuliers (B2C).
 
 ### 3.0.0 (juin 2026)
 
