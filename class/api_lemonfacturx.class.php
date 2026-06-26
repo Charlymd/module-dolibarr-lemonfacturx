@@ -112,7 +112,7 @@ class LemonfacturxApi extends DolibarrApi
 	 * Charge la facture et vérifie les droits de lecture de l'utilisateur API.
 	 *
 	 * @param int $id
-	 * @return Facture
+	 * @return object Facture chargée (type générique : éviter le model swagger de la classe core Facture, qui fait planter la génération de /explorer/swagger.json)
 	 * @throws RestException
 	 */
 	protected function loadInvoice($id)
