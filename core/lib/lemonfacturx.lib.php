@@ -874,7 +874,11 @@ function lemonfacturx_build_trade_party_xml($role, $party, $email, $legalIdMode 
 
 	$xml  = '    <ram:'.$tag.'>'."\n";
 	if (!$chorus && !empty($siret14)) {
-		$xml .= '      <ram:ID schemeID="0009">'.lemonfacturx_xml_encode($siret14).'</ram:ID>'."\n";
+		// BT-29 (vendeur) / BT-46 (acheteur) avec scheme ISO 6523 (0009 = SIRET) :
+		// l'identifiant qualifié va dans ram:GlobalID, PAS dans ram:ID. EN16931 ne
+		// lit le schemeID que sur GlobalID — sur ram:ID il est « not used in the
+		// given context » et fait échouer la validation Schematron (FNFE-MPE).
+		$xml .= '      <ram:GlobalID schemeID="0009">'.lemonfacturx_xml_encode($siret14).'</ram:GlobalID>'."\n";
 	}
 	$xml .= '      <ram:Name>'.lemonfacturx_xml_encode($party->name ?? '').'</ram:Name>'."\n";
 	if ($chorus && !empty($siret14)) {

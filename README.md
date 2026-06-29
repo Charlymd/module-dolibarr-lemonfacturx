@@ -361,6 +361,10 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 
 ## Changelog
 
+### 3.7.3 (juin 2026)
+
+**Correctif de conformité EN16931.** L'identifiant SIRET du vendeur (BT-29) et de l'acheteur (BT-46) était émis dans `ram:ID schemeID="0009"` au niveau du `TradeParty`. Or EN16931 ne lit le `schemeID` que sur `ram:GlobalID` : sur `ram:ID` l'attribut est « not used in the given context » et faisait **échouer la validation Schematron** (constaté avec le validateur FNFE-MPE — « Fully Valid : NO »). L'identifiant qualifié passe désormais dans `ram:GlobalID schemeID="0009"`. Le SIREN en `SpecifiedLegalOrganization` (BT-30, `schemeID="0002"`) et le profil Chorus Pro ne changent pas. Régénérer les factures concernées pour bénéficier du correctif.
+
 ### 3.7.2 (juin 2026)
 
 **Correctif API REST.** L'API n'expose plus la classe core `Facture` dans son spec (`@return object` au lieu de `@return Facture`) : le `@return Facture` faisait planter en **HTTP 500** la génération de `/explorer/swagger.json` dès que le module était actif (Restler tentait de modéliser toute la classe core). Les appels API authentifiés directs n'étaient pas touchés — seul l'explorer / le spec OpenAPI.
