@@ -361,6 +361,10 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 
 ## Changelog
 
+### 3.7.2 (juin 2026)
+
+**Correctif API REST.** L'API n'expose plus la classe core `Facture` dans son spec (`@return object` au lieu de `@return Facture`) : le `@return Facture` faisait planter en **HTTP 500** la génération de `/explorer/swagger.json` dès que le module était actif (Restler tentait de modéliser toute la classe core). Les appels API authentifiés directs n'étaient pas touchés — seul l'explorer / le spec OpenAPI.
+
 ### 3.7.1 (juin 2026)
 
 **Correctif de régression (à appliquer).** La 3.7.0 avait fait de l'injection in-process le mode par défaut, ce qui déclenche une erreur fatale `Declaration of FpdfTplTrait::setPageFormat must be compatible with TCPDF::setPageFormat` sur un Dolibarr standard : `pdf_getInstance()` charge le moteur `tcpdi` (`class FPDF extends TCPDF`) à chaque génération, et la lib d'injection FPDI en hérite alors → conflit de signature, génération de facture cassée. L'injection repasse par un **sous-process PHP isolé** dès qu'`exec()` est disponible (process vierge, aucun conflit possible — comportement d'avant la 3.7.0). L'in-process n'est tenté que si `exec()` est désactivé, avec un **garde-fou** qui conserve le PDF classique au lieu de planter, et un **diagnostic** qui indique la marche à suivre (activer `exec()`, ou poser `MAIN_DISABLE_TCPDI=1`).
