@@ -123,9 +123,10 @@ $xp = lfx_xpath($xml);
 lfx_assert_eq('380', lfx_xp_str($xp, '//rsm:ExchangedDocument/ram:TypeCode'), 'TypeCode');
 lfx_assert_eq('1200.00', lfx_xp_str($xp, '//ram:DuePayableAmount'), 'DuePayableAmount');
 lfx_assert_eq('S', lfx_xp_str($xp, '//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:CategoryCode'), 'CategoryCode');
-// BT-29 : SIRET (établissement) dans ram:ID/0009
-lfx_assert_eq('0009', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:ID/@schemeID'), 'BT-29 schemeID SIRET (0009)');
-lfx_assert_eq('90945830600012', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:ID'), 'BT-29 SIRET vendeur');
+// BT-29 : SIRET (établissement) dans ram:GlobalID/0009 (le schemeID ne se met PAS
+// sur ram:ID en EN16931 — sinon « @schemeID not used » côté Schematron FNFE)
+lfx_assert_eq('0009', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:GlobalID/@schemeID'), 'BT-29 schemeID SIRET (0009)');
+lfx_assert_eq('90945830600012', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:GlobalID'), 'BT-29 SIRET vendeur');
 // BT-30 : SIREN (entité légale) dans SpecifiedLegalOrganization/0002
 lfx_assert_eq('0002', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID/@schemeID'), 'BT-30 schemeID SIREN (0002)');
 lfx_assert_eq('909458306', lfx_xp_str($xp, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID'), 'BT-30 SIREN vendeur');
@@ -137,7 +138,7 @@ $wb = [];
 $socPrio = lfx_make_party(['idprof1' => '111222333', 'idprof2' => '44455566600018', 'tva_intra' => '', 'tva_assuj' => 0]);
 $xpb = lfx_xpath(lemonfacturx_build_xml($inv, $socPrio, $wb));
 lfx_assert_eq('111222333', lfx_xp_str($xpb, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID'), 'BT-30 SIREN = idprof1 (prioritaire sur le SIRET)');
-lfx_assert_eq('44455566600018', lfx_xp_str($xpb, '//ram:SellerTradeParty/ram:ID'), 'BT-29 SIRET = idprof2');
+lfx_assert_eq('44455566600018', lfx_xp_str($xpb, '//ram:SellerTradeParty/ram:GlobalID'), 'BT-29 SIRET = idprof2');
 $wf = [];
 $socFb = lfx_make_party(['idprof1' => '', 'idprof2' => '90945830600012', 'tva_intra' => 'FR38909458306']);
 $xpf = lfx_xpath(lemonfacturx_build_xml($inv, $socFb, $wf));
@@ -156,7 +157,7 @@ lfx_std_validate($xmlChorus, $xsdPath);
 $xpc = lfx_xpath($xmlChorus);
 lfx_assert_eq('0009', lfx_xp_str($xpc, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID/@schemeID'), 'Chorus: BT-30 schemeID SIRET (0009)');
 lfx_assert_eq('90945830600012', lfx_xp_str($xpc, '//ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID'), 'Chorus: BT-30 SIRET-14 vendeur');
-lfx_assert_eq(0, $xpc->query('//ram:SellerTradeParty/ram:ID')->length, 'Chorus: pas de ram:ID BT-29 séparé (SIRET uniquement en SpecifiedLegalOrganization)');
+lfx_assert_eq(0, $xpc->query('//ram:SellerTradeParty/ram:GlobalID')->length, 'Chorus: pas de GlobalID BT-29 séparé (SIRET uniquement en SpecifiedLegalOrganization)');
 lfx_assert_eq('SVC12345678', lfx_xp_str($xpc, '//ram:ApplicableHeaderTradeAgreement/ram:BuyerReference'), 'Chorus: BT-10 code service');
 lfx_assert_eq('EJ2026-42', lfx_xp_str($xpc, '//ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID'), 'Chorus: BT-13 n° engagement');
 lfx_assert_eq('MARCHE-7', lfx_xp_str($xpc, '//ram:ContractReferencedDocument/ram:IssuerAssignedID'), 'Chorus: BT-12 n° marché');
