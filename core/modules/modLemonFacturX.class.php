@@ -26,7 +26,7 @@ class modLemonFacturX extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Génération automatique de factures Factur-X EN16931";
 		$this->descriptionlong = "Injecte un XML CrossIndustryInvoice EN16931 dans chaque PDF facture client généré, pour conformité Factur-X.";
-		$this->version = '3.7.3';
+		$this->version = '3.8.0-beta';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -49,6 +49,19 @@ class modLemonFacturX extends DolibarrModules
 			'hooks' => array(
 				'pdfgeneration',
 				'invoicecard',
+				// Contexte des modèles de génération ODT des factures
+				// (core/modules/facture/doc/doc_generic_invoice_odt.modules.php :
+				// initHooks(array('odtgeneration')) puis executeHooks('afterODTCreation', …)).
+				// Permet d'injecter le Factur-X dans le PDF issu d'un modèle ODT
+				// converti par LibreOffice (prérequis : MAIN_ODT_AS_PDF=libreoffice +
+				// MAIN_ODT_AS_PDFA=1, sinon le PDF est >=1.5 et illisible par FPDI).
+				//
+				// NB déploiement : ce nouveau contexte n'est lu par Dolibarr qu'au
+				// moment où il (re)construit la liste des hooks. Sur une instance déjà
+				// active, il faut donc désactiver puis réactiver le module pour que
+				// 'odtgeneration' soit pris en compte (remove() ne supprime aucune
+				// donnée — cf. remove() ci-dessous —, la réactivation est sûre).
+				'odtgeneration',
 			),
 		);
 

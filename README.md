@@ -112,6 +112,23 @@ Sur la **fiche facture** (facture validée), deux boutons :
 - **Vérifier Factur-X** : extrait le XML embarqué du PDF et le revalide (XSD + règles métier) — à utiliser avant envoi
 - **Régénérer Factur-X** : régénère le PDF (et donc l'injection) — utile après une mise à jour du module ou une correction de données
 
+### Support des modèles ODT (expérimental, depuis 3.8.0-beta)
+
+Par défaut, l'injection Factur-X ne s'opère que sur les modèles de facture **TCPDF natifs** (sponge / crabe / octopus), via le hook `afterPDFCreation`. Les modèles **ODT** produisent un fichier `.odt` (puis un `.pdf` après conversion) et ne déclenchent que des hooks ODT : sans configuration spécifique, aucune injection n'avait lieu.
+
+Depuis la 3.8.0-beta, le module se branche aussi sur le hook `afterODTCreation` (contexte `odtgeneration`) et injecte le XML dans le PDF issu de la conversion LibreOffice. **Deux prérequis** côté Dolibarr (**Configuration → Divers → Autres**) :
+
+| Constante | Valeur | Rôle |
+|-----------|--------|------|
+| `MAIN_ODT_AS_PDF` | `libreoffice` | Convertit le `.odt` en `.pdf` à la génération (nécessite **LibreOffice installé** sur le serveur, binaire `soffice` accessible) |
+| `MAIN_ODT_AS_PDFA` | `1` | Force l'export en **PDF/A-1** (PDF 1.4). Indispensable : sans ça, LibreOffice produit un PDF ≥ 1.5 (table xref compressée) que la bibliothèque d'injection (FPDI) ne sait pas lire, et l'injection échoue proprement avec un avertissement |
+
+Comportement **best-effort** : si l'un de ces prérequis manque (conversion désactivée, PDF/A non forcé, PDF introuvable, LibreOffice absent), le module **n'injecte pas**, conserve le PDF/ODT classique et affiche un **avertissement clair** indiquant la constante à poser — jamais de fatale ni de PDF corrompu. Le mode strict (`LEMONFACTURX_STRICT_MODE`) transforme cet avertissement en erreur bloquante, comme pour le flux TCPDF.
+
+> **Statut beta** — la chaîne d'injection a été **validée en interne sur LibreOffice 7.4** : le PDF/A-1 produit par LibreOffice (`SelectPdfVersion=1`) est bien un PDF 1.4 lisible par la bibliothèque d'injection (FPDI), le Factur-X s'y embarque correctement, et le handler `afterODTCreation` dérive le bon PDF, applique ses garde-fous et injecte comme attendu. Ce qui reste à confirmer **en condition réelle** : le déclenchement par un vrai modèle ODT de votre Dolibarr (versions et templates variés — `.odt`/`.ods`, nommage `{ref}_{template}.pdf`). Vérifiez le PDF généré avec un validateur Factur-X (bouton **Vérifier Factur-X** de la fiche facture, ou un validateur en ligne type FNFE-MPE) et remontez tout problème via [SECURITY.md](SECURITY.md) / hello@hellolemon.fr.
+>
+> **Activation** : ce nouveau contexte de hook n'est pris en compte qu'après **désactivation/réactivation** du module (la désactivation ne supprime aucune donnée).
+
 ### Sécurité
 
 - Scripts CLI (`scripts/`, `tests/`, `demo/`) protégés par `PHP_SAPI === 'cli'` **et** `.htaccess` `Require all denied`
@@ -360,6 +377,10 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 ```
 
 ## Changelog
+
+### 3.8.0-beta (juin 2026)
+
+**Nouveau (expérimental) : support des modèles de facture ODT.** Le module se branche désormais aussi sur le hook `afterODTCreation` (contexte `odtgeneration`) et injecte le Factur-X dans le PDF issu d'un modèle ODT converti par LibreOffice. Prérequis : `MAIN_ODT_AS_PDF = libreoffice` + `MAIN_ODT_AS_PDFA = 1` (sinon le PDF produit est ≥ 1.5 / xref compressé, illisible par FPDI). Code 100 % best-effort : toute condition manquante dégrade proprement avec un avertissement explicite, sans fatale ni PDF corrompu. **Non testé en interne** (pas de LibreOffice sur l'environnement de dev) — à valider en condition réelle ; voir la section « Support des modèles ODT ». Réactiver le module pour que le nouveau contexte de hook soit pris en compte.
 
 ### 3.7.3 (juin 2026)
 

@@ -9,7 +9,11 @@
  *
  * Hooks LemonFacturX :
  *  - afterPDFCreation (contexte pdfgeneration) : injecte le XML Factur-X EN16931
- *    dans les PDF factures clients
+ *    dans les PDF factures clients générés par les modèles TCPDF natifs
+ *    (sponge / crabe / octopus)
+ *  - afterODTCreation (contexte odtgeneration) : même injection pour les factures
+ *    générées via un modèle ODT, une fois le .odt converti en PDF/A par LibreOffice
+ *    (prérequis MAIN_ODT_AS_PDF=libreoffice + MAIN_ODT_AS_PDFA=1)
  *  - addMoreActionsButtons / doActions (contexte invoicecard) : boutons
  *    "Vérifier Factur-X" et "Régénérer Factur-X" sur la fiche facture
  */
@@ -173,6 +177,229 @@ class ActionsLemonFacturX
 			}
 
 			dol_syslog('LemonFacturX: PDF Factur-X généré pour '.$invoice->ref, LOG_INFO);
+			$this->reportSuccess($invoice->ref, $warnings);
+			return 0;
+		} finally {
+			if ($this->xmlTmpFile !== null) {
+				@unlink($this->xmlTmpFile);
+				$this->xmlTmpFile = null;
+			}
+		}
+	}
+
+	/**
+	 * Hook afterODTCreation — contexte odtgeneration.
+	 *
+	 * Injecte le XML Factur-X EN16931 dans le PDF produit à partir d'un MODÈLE ODT
+	 * de facture. Le modèle ODT (core/modules/facture/doc/doc_generic_invoice_odt.modules.php)
+	 * appelle ce hook APRÈS avoir, le cas échéant, converti le .odt en .pdf via
+	 * LibreOffice (exportAsAttachedPDF), donc le PDF est déjà sur le disque ici.
+	 *
+	 * Le module n'injecte que sur le hook afterPDFCreation des modèles TCPDF natifs
+	 * (sponge/crabe/octopus). Les modèles ODT ne tirent que les hooks ODT : sans ce
+	 * handler, aucune injection Factur-X n'avait lieu sur une facture générée en ODT.
+	 *
+	 * IMPORTANT — code 100 % défensif et best-effort : il n'existe PAS de LibreOffice
+	 * sur l'infra de développement, ce chemin n'est donc validé qu'en condition réelle
+	 * chez l'utilisateur. Toute condition non réunie (conversion PDF désactivée, PDF
+	 * introuvable, PDF illisible par FPDI faute de PDF/A) dégrade proprement : on laisse
+	 * le PDF ODT classique en place et on émet un AVERTISSEMENT clair, jamais de fatale,
+	 * jamais de PDF corrompu (l'injection elle-même est atomique).
+	 *
+	 * Anti-boucle : ce handler agit uniquement sur le PDF DÉJÀ produit, il ne
+	 * redéclenche aucune génération de document (pas de generateDocument()).
+	 * Idempotent : une 2e génération ODT réécrase le {ref}.pdf source AVANT ce hook,
+	 * l'injection repart donc d'un PDF propre (pas de double-injection cumulative).
+	 *
+	 * @param array       $parameters  array('odfHandler'=>.., 'file'=>{ref}.odt, 'object'=>Facture, 'outputlangs'=>.., 'substitutionarray'=>..)
+	 * @param CommonObject $object     Objet courant (le modèle de doc, non utilisé ici)
+	 * @param string      $action      Action courante (non modifiée)
+	 * @param HookManager $hookmanager
+	 * @return int  0 (toujours non bloquant, sauf -1 explicite en mode strict via handleNonFatal)
+	 */
+	public function afterODTCreation($parameters, &$object, &$action, $hookmanager)
+	{
+		global $mysoc, $langs;
+
+		// 1) Périmètre : uniquement les FACTURES. En contexte odtgeneration, le
+		// modèle passe l'objet métier dans $parameters['object'] (= le $facture).
+		$invoice = $parameters['object'] ?? null;
+		if (!is_object($invoice) || !($invoice instanceof Facture)) {
+			return 0;
+		}
+
+		// Ne jamais injecter sur un brouillon (même raison qu'afterPDFCreation :
+		// Dolibarr régénère le document à chaque modif de ligne d'une facture en
+		// brouillon ; le Factur-X n'a de sens qu'à la validation). À la validation,
+		// le statut passe à VALIDATED AVANT le generateDocument(), l'injection a
+		// donc bien lieu à ce moment.
+		if ((int) ($invoice->status ?? $invoice->statut ?? 0) === Facture::STATUS_DRAFT) {
+			return 0;
+		}
+
+		$modulePath = dirname(__DIR__);
+		require_once $modulePath.'/core/lib/lemonfacturx.lib.php';
+		require_once $modulePath.'/core/lib/lemonfacturx_rules.php';
+		if (is_object($langs)) {
+			$langs->loadLangs(['lemonfacturx@lemonfacturx']);
+		}
+
+		$strict = (int) getDolGlobalInt('LEMONFACTURX_STRICT_MODE', 0);
+
+		// 2) Dériver le chemin du PDF produit depuis $parameters['file'] (= le fichier
+		// ODF source : .odt le plus souvent, mais aussi .ods/.odx selon le modèle).
+		// soffice --convert-to pdf écrit le PDF dans le MÊME dossier en remplaçant la
+		// DERNIÈRE extension du fichier source par .pdf (ex {ref}.odt → {ref}.pdf,
+		// {ref}_{tpl}.ods → {ref}_{tpl}.pdf). On strippe donc la dernière extension,
+		// pas seulement .od(x|t). On NE travaille JAMAIS sur le .odt
+		// (MAIN_ODT_AS_PDF_DEL_SOURCE peut l'avoir supprimé) : la cible est le .pdf.
+		$odtFile = (string) ($parameters['file'] ?? '');
+		if ($odtFile === '') {
+			return 0;
+		}
+		$pdf = preg_replace('/\.[^.\/]+$/', '', $odtFile).'.pdf';
+
+		// 3) Garde best-effort sur la conversion PDF/A. Sans MAIN_ODT_AS_PDF=libreoffice,
+		// aucun PDF n'est produit (il n'y a qu'un .odt) → rien à injecter. Sans
+		// MAIN_ODT_AS_PDFA, LibreOffice produit un PDF >=1.5 (xref compressé) que le
+		// FPDI gratuit refuse ("compression technique not supported") : l'injection
+		// échouerait avec une erreur cryptique. On anticipe ces deux cas avec un
+		// message dédié et explicite plutôt qu'un échec d'injection opaque.
+		$odtAsPdf = strtolower(trim(getDolGlobalString('MAIN_ODT_AS_PDF', '')));
+		$odtAsPdfa = (int) getDolGlobalInt('MAIN_ODT_AS_PDFA', 0);
+		if ($odtAsPdf !== 'libreoffice') {
+			// Conversion ODT→PDF non activée, OU convertisseur qui n'honore pas le
+			// PDF/A : seul MAIN_ODT_AS_PDF=libreoffice produit un PDF/A injectable (via
+			// le filtre SelectPdfVersion). Sans lui : soit il n'y a qu'un .odt, soit le
+			// PDF est >=1.5 illisible par FPDI. On informe sans bloquer.
+			return $this->handleNonFatal(
+				'LemonFacturX: '.lemonfacturx_trans('LemonFacturXOdtErrNoPdfConv'),
+				$strict,
+				lemonfacturx_trans('LemonFacturXOdtHintEnable')
+			);
+		}
+		if ($odtAsPdfa < 1) {
+			// PDF produit mais probablement >=1.5 : on prévient (best-effort) plutôt
+			// que de partir dans une injection vouée à un échec FPDI illisible.
+			return $this->handleNonFatal(
+				'LemonFacturX: '.lemonfacturx_trans('LemonFacturXOdtErrNoPdfa'),
+				$strict,
+				lemonfacturx_trans('LemonFacturXOdtHintEnablePdfa')
+			);
+		}
+
+		// Le PDF dérivé doit exister sur le disque. S'il manque (échec silencieux de
+		// la conversion LibreOffice, soffice absent...), on n'invente rien : warning
+		// best-effort, on laisse le .odt en place.
+		if (!file_exists($pdf)) {
+			return $this->handleNonFatal(
+				'LemonFacturX: '.lemonfacturx_trans('LemonFacturXOdtErrPdfMissing', basename($pdf)),
+				$strict,
+				lemonfacturx_trans('LemonFacturXOdtHintEnablePdfa')
+			);
+		}
+
+		// 4) Préparation de la facture + périmètre supporté (mêmes garde-fous
+		// qu'afterPDFCreation : multidevise, taxes locales, date manquante...).
+		if (empty($invoice->thirdparty) || !is_object($invoice->thirdparty)) {
+			$invoice->fetch_thirdparty();
+		}
+		if (empty($invoice->thirdparty) || !is_object($invoice->thirdparty)) {
+			return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrNoThirdparty'), $strict);
+		}
+		if (empty($mysoc) || !is_object($mysoc) || empty($mysoc->name)) {
+			return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrNoMysoc'), $strict);
+		}
+		if (empty($invoice->lines)) {
+			$invoice->fetch_lines();
+		}
+
+		$unsupported = lemonfacturx_check_supported($invoice);
+		if ($unsupported !== null) {
+			return $this->handleNonFatal('LemonFacturX: '.$unsupported, $strict, lemonfacturx_trans('LemonFacturXHintPdfKept'));
+		}
+
+		// 5) Construction + validation du XML (réutilise intégralement le pipeline,
+		// profil PDP par défaut — appel sans $options, comme le PDF EN16931 standard).
+		$warnings = lemonfacturx_check_mandatory($invoice, $mysoc);
+
+		$buildWarnings = [];
+		$xml = lemonfacturx_build_xml($invoice, $mysoc, $buildWarnings);
+		$warnings = array_merge($warnings, $buildWarnings);
+
+		foreach ($warnings as $w) {
+			dol_syslog('LemonFacturX WARNING (ODT): '.$w, LOG_WARNING);
+		}
+
+		$validationError = $this->validateXml($xml, $modulePath);
+		if ($validationError !== null) {
+			return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrInvalidXml').' : '.$validationError, $strict, lemonfacturx_trans('LemonFacturXHintPdfKept'));
+		}
+
+		if (getDolGlobalInt('LEMONFACTURX_BR_CHECK', 1)) {
+			$brViolations = lemonfacturx_validate_business_rules($xml);
+			if (!empty($brViolations)) {
+				if ($strict) {
+					return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrBrViolations').' — '.implode(' ; ', $brViolations), $strict);
+				}
+				foreach ($brViolations as $v) {
+					dol_syslog('LemonFacturX BR (ODT): '.$v, LOG_WARNING);
+					$warnings[] = lemonfacturx_trans('LemonFacturXWarnBrPrefix').' '.$v;
+				}
+			}
+		}
+
+		// 6) Écriture du XML temporaire (même dossier que le reste : toujours dans
+		// l'open_basedir Dolibarr).
+		$xmlTempDir = DOL_DATA_ROOT.'/facturx/temp';
+		dol_mkdir($xmlTempDir);
+		$this->xmlTmpFile = tempnam($xmlTempDir, 'facturx_');
+		if ($this->xmlTmpFile === false) {
+			$this->xmlTmpFile = null;
+			return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrTempDir', $xmlTempDir), $strict);
+		}
+		if (file_put_contents($this->xmlTmpFile, $xml) === false) {
+			@unlink($this->xmlTmpFile);
+			$this->xmlTmpFile = null;
+			return $this->handleNonFatal('LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrTempWrite', $xmlTempDir), $strict);
+		}
+
+		try {
+			// 7) Injection (réutilise EXACTEMENT injectFacturx : mode auto =
+			// sous-process si exec() dispo, sinon in-process avec garde-fou
+			// detectInProcessPdfConflict). Aucune spécificité ODT à coder : le
+			// conflit FPDF/tcpdi est géré à l'identique dans les deux contextes.
+			$inj = $this->injectFacturx($pdf, $this->xmlTmpFile, $modulePath);
+			if (!$inj['ok']) {
+				return $this->handleNonFatal(
+					'LemonFacturX: '.lemonfacturx_trans('LemonFacturXErrInjectFailed').' : '.dol_trunc($inj['error'], 300),
+					$strict,
+					lemonfacturx_trans('LemonFacturXOdtHintEnablePdfa')
+				);
+			}
+
+			// Post-validation PDF/A-3 optionnelle via veraPDF (non bloquante).
+			// NB : LibreOffice produit déjà un PDF/A-1b/2b/3b selon MAIN_ODT_AS_PDFA ;
+			// veraPDF peut signaler un écart de niveau PDF/A — on le garde non bloquant.
+			$veraWarning = $this->runVeraPdf($pdf);
+			if ($veraWarning !== null) {
+				$warnings[] = $veraWarning;
+			}
+
+			// Chorus Pro (opt-in) : même logique que le flux TCPDF, le 2e PDF est
+			// copié depuis ce {ref}.pdf déjà injecté.
+			if (getDolGlobalInt('LEMONFACTURX_CHORUS_ENABLED')) {
+				if (lemonfacturx_is_chorus_invoice($invoice)) {
+					$chorus = $this->generateChorusPdf($invoice, $pdf, $mysoc, $modulePath);
+					if (!$chorus['ok']) {
+						$warnings[] = $chorus['msg'];
+					}
+				}
+			} elseif (lemonfacturx_is_public_sector_siret($invoice)) {
+				$warnings[] = lemonfacturx_trans('LemonFacturXChorusSuggested');
+			}
+
+			dol_syslog('LemonFacturX: PDF Factur-X (ODT) généré pour '.$invoice->ref, LOG_INFO);
 			$this->reportSuccess($invoice->ref, $warnings);
 			return 0;
 		} finally {
