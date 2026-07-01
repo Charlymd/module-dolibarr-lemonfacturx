@@ -79,6 +79,13 @@ LemonFacturXMsgRegenerateFailed = PDF regeneration failed
 LemonFacturXMsgSuccess = Factur-X EN16931 e-invoice embedded in PDF %s.
 LemonFacturXMsgSuccessWithWarnings = Factur-X EN16931 e-invoice embedded in PDF %s. %s non blocking warning(s) to fix for full compliance:
 
+# ODT template support (experimental, v3.8.0) — afterODTCreation hook
+LemonFacturXOdtErrNoPdfConv = ODT template without PDF conversion: Factur-X requires a PDF, but only the .odt file was produced
+LemonFacturXOdtHintEnable = set MAIN_ODT_AS_PDF = libreoffice (and install LibreOffice on the server) to convert the ODT to PDF before injection
+LemonFacturXOdtErrNoPdfa = the PDF produced from the ODT template is not PDF/A: LibreOffice then outputs a PDF >= 1.5 (compressed xref table) that the Factur-X injection library cannot read
+LemonFacturXOdtHintEnablePdfa = set MAIN_ODT_AS_PDF = libreoffice + MAIN_ODT_AS_PDFA = 1 to produce a readable, injectable PDF/A-1
+LemonFacturXOdtErrPdfMissing = expected PDF not found next to the ODT template (%s): the LibreOffice conversion probably failed (soffice binary missing or not in PATH)
+
 LemonFacturXErrMulticurrency = invoice in a foreign currency (%s ≠ company currency %s) — unsupported: the XML would diverge from the visible PDF (documented limitation)
 LemonFacturXErrLocalTax = invoice with local taxes (localtax1/2) — unsupported: EN16931 only represents VAT, the XML total would diverge from the visible PDF total (documented limitation)
 LemonFacturXErrNoDate = invoice has no issue date

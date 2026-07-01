@@ -1748,8 +1748,8 @@ function lemonfacturx_invoice_pdf_path($ref, $entity, $lastMainDoc = '')
 	$dir = !empty($conf->facture->multidir_output[$entity])
 		? $conf->facture->multidir_output[$entity]
 		: ($conf->facture->dir_output ?? '');
+	$safeRef = dol_sanitizeFileName($ref);
 	if (!empty($dir)) {
-		$safeRef = dol_sanitizeFileName($ref);
 		$path = $dir.'/'.$safeRef.'/'.$safeRef.'.pdf';
 		if (file_exists($path)) {
 			return $path;
@@ -1759,6 +1759,23 @@ function lemonfacturx_invoice_pdf_path($ref, $entity, $lastMainDoc = '')
 		$candidate = DOL_DATA_ROOT.'/'.ltrim($lastMainDoc, '/');
 		if (file_exists($candidate)) {
 			return $candidate;
+		}
+	}
+	// Repli modèle ODT : le PDF y est nommé {ref}_{template}.pdf (pas {ref}.pdf) et
+	// last_main_doc peut pointer le .odt. On prend alors le PDF le plus récent du
+	// dossier de la facture, hors PDF Chorus ({ref}-CHORUS.pdf).
+	if (!empty($dir)) {
+		$cands = glob($dir.'/'.$safeRef.'/*.pdf');
+		if (!empty($cands)) {
+			$cands = array_values(array_filter($cands, function ($f) {
+				return !preg_match('/-CHORUS\.pdf$/i', $f);
+			}));
+			if (!empty($cands)) {
+				usort($cands, function ($a, $b) {
+					return (int) filemtime($b) - (int) filemtime($a);
+				});
+				return $cands[0];
+			}
 		}
 	}
 	return null;

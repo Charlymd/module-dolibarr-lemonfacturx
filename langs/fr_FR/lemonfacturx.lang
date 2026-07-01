@@ -79,6 +79,13 @@ LemonFacturXMsgRegenerateFailed = Échec de la régénération du PDF
 LemonFacturXMsgSuccess = Facture électronique Factur-X EN16931 embarquée dans le PDF %s.
 LemonFacturXMsgSuccessWithWarnings = Facture électronique Factur-X EN16931 embarquée dans le PDF %s. %s avertissement(s) non bloquant(s) à corriger pour une conformité totale :
 
+# Support des modèles ODT (expérimental, v3.8.0) — hook afterODTCreation
+LemonFacturXOdtErrNoPdfConv = modèle ODT sans conversion PDF : le Factur-X nécessite un PDF, or seul le fichier .odt a été produit
+LemonFacturXOdtHintEnable = poser MAIN_ODT_AS_PDF = libreoffice (et installer LibreOffice côté serveur) pour convertir l'ODT en PDF avant injection
+LemonFacturXOdtErrNoPdfa = le PDF issu du modèle ODT n'est pas en PDF/A : LibreOffice produit alors un PDF ≥ 1.5 (table xref compressée) illisible par la bibliothèque d'injection Factur-X
+LemonFacturXOdtHintEnablePdfa = poser MAIN_ODT_AS_PDF = libreoffice + MAIN_ODT_AS_PDFA = 1 pour produire un PDF/A-1 lisible et injectable
+LemonFacturXOdtErrPdfMissing = PDF attendu introuvable à côté du modèle ODT (%s) : la conversion LibreOffice a probablement échoué (binaire soffice absent ou hors PATH)
+
 LemonFacturXErrMulticurrency = facture en devise étrangère (%s ≠ devise société %s) — non supporté : le XML serait incohérent avec le PDF visible (limitation documentée)
 LemonFacturXErrLocalTax = facture avec taxes locales (localtax1/2) — non supporté : EN16931 ne représente que la TVA, le total XML divergerait du TTC visible sur le PDF (limitation documentée)
 LemonFacturXErrNoDate = facture sans date d'émission
