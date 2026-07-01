@@ -13,20 +13,20 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 - **Dolibarr** 19.0 → 23.x — vérifié à l'activation (`need_dolibarr_version`)
 - **PHP** 8.1+ (testé sur 8.2/8.4) — vérifié à l'activation (`phpmin`)
 - **Fonction `exec()`** : utilisée par défaut pour l'injection PDF (sous-process PHP isolé, le chemin le plus robuste). **Pas strictement obligatoire** : si `exec()` est désactivé (`disable_functions`, hébergements mutualisés durcis), le module bascule automatiquement en injection **in-process**. Le mode est réglable (`LEMONFACTURX_INJECTION_MODE` : `auto` / `inprocess` / `subprocess`) — voir la section Injection.
-- **Constante Dolibarr** `MAIN_PDF_FORCE_FONT` = `pdfahelvetica` (polices embarquées, requis PDF/A-3) — vérifiée par le diagnostic et signalée en warning à chaque génération si absente
+- **Une police PDF à glyphes embarqués** (nécessaire à la validité PDF/A-3). Pas de constante à poser à la main : le module fournit un **sélecteur « Police du PDF généré »** dans sa config, qui marque chaque police ✓ (embarquée, conforme) ou ⚠ (base-14, non conforme). `pdfahelvetica` est proposée par défaut.
 
 ## Installation
 
 1. **Télécharger l'archive de la dernière release** sur
    [github.com/hello-lemon/module-dolibarr-lemonfacturx/releases/latest](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/releases/latest).
 
-   Récupérer l'asset `lemonfacturx-vX.Y.Z.zip` attaché à la release (et **non** le
+   Récupérer l'asset `module_lemonfacturx-X.Y.Z.zip` attaché à la release (et **non** le
    bouton "Download ZIP" du code source — voir l'avertissement plus bas).
 
 2. Décompresser et copier le dossier `lemonfacturx/` dans le répertoire custom de Dolibarr :
 
    ```bash
-   unzip lemonfacturx-vX.Y.Z.zip
+   unzip module_lemonfacturx-X.Y.Z.zip
    cp -r lemonfacturx/ /var/www/html/custom/
    chown -R www-data:www-data /var/www/html/custom/lemonfacturx
    ```
@@ -39,7 +39,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
    - Exigibilité TVA (BT-8 : débits / encaissements), cadre de facturation (BT-23)
    - Mode de gestion d'erreur (best-effort / strict), contrôle des règles métier
    - Éventuellement chemin PHP CLI, chemin veraPDF et mentions légales
-5. Poser `MAIN_PDF_FORCE_FONT = pdfahelvetica` via **Accueil > Configuration > Divers**
+5. Choisir une **police embarquée** dans le sélecteur **« Police du PDF généré »** de la config du module (`pdfahelvetica` par défaut, marquée ✓)
 6. Vérifier le **diagnostic** en bas de la page de configuration du module (coches vertes = OK)
 
 > **Attention** — N'utilisez pas le bouton "Download ZIP" de la page d'accueil du dépôt
@@ -331,7 +331,7 @@ Le dossier `vendor/` contient les libs nécessaires (pas de Composer requis sur 
 ## Conformité PDF/A-3
 
 La conformité PDF/A-3 est assurée par :
-- **Polices embarquées** : constante Dolibarr `MAIN_PDF_FORCE_FONT=pdfahelvetica` — désormais **vérifiée** par le diagnostic et par un warning à la génération
+- **Polices embarquées** : choisies via le sélecteur **« Police du PDF généré »** du module (`pdfahelvetica` par défaut) ; le diagnostic vérifie qu'une police embarquée est bien posée. Sans police embarquée (Helvetica base-14), le PDF/A-3 est invalide même si le rendu paraît correct.
 - **AFRelationship `Alternative`** : conforme à la spec Factur-X pour le profil EN16931 (corrigé en 3.0.0, `Data` auparavant)
 - **Annotations /F flag** : patch appliqué dans `vendor/setasign/fpdf/fpdf.php` (ajout `/F 4` aux liens)
 - **Profil ICC sRGB** + **métadonnées XMP** : gérés par la lib `atgp/factur-x`
