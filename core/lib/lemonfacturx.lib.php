@@ -26,6 +26,10 @@ if (!defined('LEMONFACTURX_EU_COUNTRIES')) {
 		'AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI','FR','GR','HR','HU',
 		'IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK',
 	]);
+	// Codes pays des DOM/COM remplacés par FR dans les flux de la réforme
+	// (BR-FR-MAP-14) : assimilés à la France pour la note BAR et pour
+	// l'applicabilité du bloc de règles BR-FR du validateur interne.
+	define('LEMONFACTURX_FR_OVERSEAS_COUNTRIES', ['GF', 'TF', 'GP', 'GY', 'MQ', 'YT', 'RE', 'BL', 'MF', 'PM']);
 	define('LEMONFACTURX_DEFAULT_NOTE_PMD', 'En cas de retard de paiement, une pénalité égale à 3 fois le taux d\'intérêt légal sera exigible (article L.441-10 du Code de commerce).');
 	define('LEMONFACTURX_DEFAULT_NOTE_PMT', 'Une indemnité forfaitaire de 40 euros sera exigible pour frais de recouvrement en cas de retard de paiement.');
 	define('LEMONFACTURX_DEFAULT_NOTE_AAB', 'Pas d\'escompte pour paiement anticipé.');
@@ -147,11 +151,14 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 
 	// === ExchangedDocumentContext ===
 	$xml .= '<rsm:ExchangedDocumentContext>'."\n";
-	// BT-23 : cadre de facturation (process métier). Choisi PAR FACTURE dans
-	// l'onglet Chorus pour le profil B2G (24 valeurs AIFE A1..A25, A1 par défaut).
-	// Le PDF standard (PDP/B2B) n'en émet pas — toléré, et évite un cadre figé
-	// global inadapté à chaque facture.
-	$bt23 = ($profile === 'choruspro') ? (!empty($options['cadre']) ? $options['cadre'] : 'A1') : '';
+	// BT-23 : cadre de facturation, obligatoire pour la réforme FR (BR-FR-08).
+	//  - profil Chorus B2G : cadre AIFE choisi PAR FACTURE dans l'onglet Chorus
+	//    (24 valeurs A1..A25, A1 par défaut) — chemin historique inchangé ;
+	//  - profil PDP/B2B : valeur du socle XP Z12-012 dérivée des lignes et des
+	//    acomptes imputés (cas nominal : dépôt de la facture par le fournisseur).
+	$bt23 = ($profile === 'choruspro')
+		? (!empty($options['cadre']) ? $options['cadre'] : 'A1')
+		: lemonfacturx_resolve_business_process($billableLines, $typeCode, lemonfacturx_get_prepaid_amount($invoice));
 	if ($bt23 !== '') {
 		$xml .= '  <ram:BusinessProcessSpecifiedDocumentContextParameter>'."\n";
 		$xml .= '    <ram:ID>'.lemonfacturx_xml_encode($bt23).'</ram:ID>'."\n";
@@ -169,7 +176,10 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 	$xml .= '  <ram:IssueDateTime>'."\n";
 	$xml .= '    <udt:DateTimeString format="102">'.lemonfacturx_xml_encode($issueDate).'</udt:DateTimeString>'."\n";
 	$xml .= '  </ram:IssueDateTime>'."\n";
-	$xml .= lemonfacturx_build_legal_notes_xml();
+	// Note BAR (BR-FR-07/20) : qualification du traitement attendu, émise sur le
+	// profil PDP uniquement (le B2G Chorus a son propre marquage, hors périmètre).
+	$barCode = ($profile === 'choruspro') ? '' : lemonfacturx_resolve_bar_code($buyer);
+	$xml .= lemonfacturx_build_legal_notes_xml($barCode);
 	$xml .= '</rsm:ExchangedDocument>'."\n";
 
 	// === SupplyChainTradeTransaction ===
@@ -341,7 +351,8 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 
 	// BG-3 : références aux factures antérieures (facture d'origine d'un avoir /
 	// d'une rectificative, factures d'acompte imputées sur une facture finale).
-	foreach (lemonfacturx_get_preceding_invoices($invoice) as $prev) {
+	// Rectificative (384) : seule la facture remplacée est référencée (BR-FR-CO-04).
+	foreach (lemonfacturx_get_preceding_invoices($invoice, $typeCode) as $prev) {
 		$xml .= '    <ram:InvoiceReferencedDocument>'."\n";
 		$xml .= '      <ram:IssuerAssignedID>'.lemonfacturx_xml_encode($prev['ref']).'</ram:IssuerAssignedID>'."\n";
 		if (!empty($prev['date'])) {
@@ -357,9 +368,15 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 	$xml .= '</rsm:SupplyChainTradeTransaction>'."\n";
 	$xml .= '</rsm:CrossIndustryInvoice>';
 
-	// Avoir sans facture d'origine : mention FR obligatoire impossible à émettre
-	if ($isCreditNote && empty($invoice->fk_facture_source)) {
-		$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnCreditNoteNoSource');
+	// Avoir (381, BR-FR-CO-05) ou rectificative (384, BR-FR-CO-04) sans facture
+	// d'origine : la référence BT-25 exigée ne peut pas être émise. Warning
+	// actionnable ici ; le validateur interne porte la violation bloquante.
+	if (empty($invoice->fk_facture_source)) {
+		if ($isCreditNote) {
+			$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnCreditNoteNoSource');
+		} elseif ($typeCode === '384') {
+			$buildWarnings[] = lemonfacturx_trans('LemonFacturXWarnCorrectiveNoSource');
+		}
 	}
 
 	return $xml;
@@ -527,15 +544,24 @@ function lemonfacturx_conf_or_default($key, $default)
 
 /**
  * Génère les 3 IncludedNote BR-FR-05 (PMD, PMT, AAB) avec les valeurs
- * surchargeables via constantes Dolibarr (défaut appliqué si la constante est vide).
+ * surchargeables via constantes Dolibarr (défaut appliqué si la constante est vide),
+ * plus la note BAR (qualification du traitement attendu, BR-FR-07/20) quand un
+ * code est fourni. Chaque code sujet n'est émis qu'une fois (BR-FR-06, BR-FR-31).
+ *
+ * @param string $barCode  'B2B', 'B2BINT' ou 'B2C' (cf. lemonfacturx_resolve_bar_code),
+ *                         ou '' pour ne pas émettre de note BAR
  */
-function lemonfacturx_build_legal_notes_xml()
+function lemonfacturx_build_legal_notes_xml($barCode = '')
 {
 	$notes = [
 		'PMD' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMD', LEMONFACTURX_DEFAULT_NOTE_PMD),
 		'PMT' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_PMT', LEMONFACTURX_DEFAULT_NOTE_PMT),
 		'AAB' => lemonfacturx_conf_or_default('LEMONFACTURX_NOTE_AAB', LEMONFACTURX_DEFAULT_NOTE_AAB),
 	];
+	if ($barCode !== '') {
+		// BR-FR-20 : le contenu (BT-22) est le code brut, sans texte libre autour
+		$notes['BAR'] = $barCode;
+	}
 	$xml = '';
 	foreach ($notes as $code => $content) {
 		$xml .= '  <ram:IncludedNote>'."\n";
@@ -544,6 +570,77 @@ function lemonfacturx_build_legal_notes_xml()
 		$xml .= '  </ram:IncludedNote>'."\n";
 	}
 	return $xml;
+}
+
+/**
+ * Code de qualification du traitement attendu (note BAR — règles BR-FR-07,
+ * BR-FR-20 et BR-FR-31 : une seule valeur parmi la liste fermée) :
+ *  - 'B2C'    : acheteur non assujetti (particulier ou « Assujetti à la TVA » à
+ *               Non) → relève du e-reporting des ventes B2C ;
+ *  - 'B2BINT' : acheteur assujetti établi hors France → e-reporting des ventes
+ *               B2B internationales ;
+ *  - 'B2B'    : acheteur assujetti français → e-invoicing (cas nominal).
+ * Les codes pays des DOM/COM (remplacés par FR dans les flux, cf. BR-FR-MAP-14)
+ * sont assimilés à la France. Les valeurs OUTOFSCOPE et ARCHIVEONLY couvrent des
+ * cas (hors réforme, avoir interne d'annulation) que le module ne produit pas.
+ *
+ * Choix assumé : un acheteur non assujetti établi HORS France est aussi émis en
+ * 'B2C'. La liste fermée de BR-FR-20 (XP Z12-012, révision juillet 2025) ne
+ * comporte aucune valeur « B2C international » — émettre un code hors liste
+ * violerait BR-FR-20 ; la qualification fine domestique/international relève du
+ * flux e-reporting (10.x), pas de la note BAR. À revoir si une révision
+ * ultérieure de la norme ajoute cette valeur.
+ *
+ * @param Societe|object $buyer  Tiers acheteur
+ * @return string 'B2B', 'B2BINT' ou 'B2C'
+ */
+function lemonfacturx_resolve_bar_code($buyer)
+{
+	if (lemonfacturx_is_non_assujetti($buyer)) {
+		return 'B2C';
+	}
+	$country = strtoupper(!empty($buyer->country_code) ? $buyer->country_code : 'FR');
+	// Codes remplacés par FR dans les flux (BR-FR-MAP-14) : traités comme FR
+	if ($country !== 'FR' && !in_array($country, LEMONFACTURX_FR_OVERSEAS_COUNTRIES, true)) {
+		return 'B2BINT';
+	}
+	return 'B2B';
+}
+
+/**
+ * Cadre de facturation du socle réforme (BT-23, règle BR-FR-08) pour le profil
+ * PDP/B2B. Liste fermée XP Z12-012 : la lettre qualifie la nature de la facture
+ * (B = biens, S = services, M = double), déduite du product_type des lignes ;
+ * le chiffre qualifie le processus de dépôt.
+ *  - Cas nominal (dépôt de la facture par le fournisseur) : B1 / S1 / M1.
+ *  - Facture définitive après acompte (acomptes imputés) : B4 / S4 / M4 —
+ *    jamais sur une facture d'acompte elle-même (interdit par BR-FR-CO-08).
+ * Les processus spécifiques (déjà payée x2, sous-traitance S3/S5/S6,
+ * autofacturation, multi-vendeurs x8, bidirectionnel x9) ne correspondent à
+ * aucun flux produit par ce module : non émis.
+ *
+ * @param array  $billableLines  Lignes facturables (cf. lemonfacturx_filter_billable_lines)
+ * @param string $typeCode       TypeCode BT-3 émis ('380', '386', '381'...)
+ * @param float  $prepaidAmount  Montant d'acomptes imputés (BT-113)
+ * @return string 'B1'|'S1'|'M1'|'B4'|'S4'|'M4'
+ */
+function lemonfacturx_resolve_business_process($billableLines, $typeCode, $prepaidAmount = 0.0)
+{
+	$hasGoods = false;
+	$hasServices = false;
+	foreach ((array) $billableLines as $line) {
+		if ((int) ($line->product_type ?? 0) === 1) {
+			$hasServices = true;
+		} else {
+			$hasGoods = true;
+		}
+	}
+	$letter = ($hasGoods && $hasServices) ? 'M' : ($hasServices ? 'S' : 'B');
+	// BR-FR-CO-08 : un cadre x4 (facture définitive après acompte) est
+	// incompatible avec les types facture d'acompte (386/500/503)
+	$isDepositInvoice = in_array($typeCode, ['386', '500', '503'], true);
+	$digit = (!$isDepositInvoice && (float) $prepaidAmount > 0) ? '4' : '1';
+	return $letter.$digit;
 }
 
 /**
@@ -826,6 +923,68 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerSIRETLen', strlen($buyerSiret));
 	}
 
+	// BR-FR-01/02 : identifiant de facture (BT-1) — 35 caractères maximum,
+	// alphanumériques + « - + _ / » uniquement (l'espace n'est pas admis).
+	// Contrôle amont ; la violation bloquante est portée par le validateur.
+	$ref = (string) ($invoice->ref ?? '');
+	if ($ref !== '') {
+		$refLen = function_exists('mb_strlen') ? mb_strlen($ref) : strlen($ref);
+		if ($refLen > 35) {
+			$warnings[] = lemonfacturx_trans('LemonFacturXWarnRefTooLong', $refLen);
+		}
+		if (!preg_match('/^[A-Za-z0-9+_\/-]+$/', $ref)) {
+			$warnings[] = lemonfacturx_trans('LemonFacturXWarnRefCharset', $ref);
+		}
+	}
+
+	// BR-FR-09 : quand un SIREN (idprof1) ET un SIRET (idprof2) sont saisis,
+	// les 9 premiers chiffres du SIRET doivent correspondre au SIREN.
+	$sellerSirenSaisi = $sellerIsFR ? preg_replace('/[^0-9]/', '', $mysoc->idprof1 ?? '') : '';
+	if (strlen($sellerSirenSaisi) === 9 && strlen($sellerSiret) === 14 && strncmp($sellerSiret, $sellerSirenSaisi, 9) !== 0) {
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnSellerSirenSiretMismatch', $sellerSirenSaisi, $sellerSiret);
+	}
+	$buyerSirenSaisi = $buyerIsFR ? preg_replace('/[^0-9]/', '', $buyer->idprof1 ?? '') : '';
+	if (strlen($buyerSirenSaisi) === 9 && strlen($buyerSiret) === 14 && strncmp($buyerSiret, $buyerSirenSaisi, 9) !== 0) {
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnBuyerSirenSiretMismatch', $buyerSirenSaisi, $buyerSiret);
+	}
+
+	// BR-FR-16 : taux de TVA hors liste française fermée (métropole + DOM).
+	// AVERTISSEMENT uniquement — la liste de la norme peut évoluer et un taux
+	// légitime ne doit jamais être bloqué.
+	$frVatRates = [0.0, 0.9, 1.05, 1.75, 2.1, 5.5, 7.0, 8.5, 9.2, 9.6, 10.0, 13.0, 19.6, 20.0, 20.6];
+	$flaggedRates = [];
+	foreach ((array) ($invoice->lines ?? []) as $line) {
+		$rate = round((float) ($line->tva_tx ?? 0), 2);
+		$known = false;
+		foreach ($frVatRates as $fr) {
+			if (abs($rate - $fr) < 0.001) {
+				$known = true;
+				break;
+			}
+		}
+		if (!$known) {
+			$flaggedRates[(string) $rate] = true;
+		}
+	}
+	foreach (array_keys($flaggedRates) as $rate) {
+		$warnings[] = lemonfacturx_trans('LemonFacturXWarnVatRateNotFR', $rate);
+	}
+
+	// BR-FR-23/25 : suffixe d'adresse électronique vendeur — charset fermé
+	// (sanitisé à l'émission par lemonfacturx_build_endpoint_uri) et longueur
+	// totale de l'adresse limitée à 125 caractères.
+	$endpointSuffix = trim(getDolGlobalString('LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', ''));
+	if ($endpointSuffix !== '') {
+		$suffixClean = preg_replace('/[^A-Za-z0-9._-]/', '', $endpointSuffix);
+		if ($suffixClean !== $endpointSuffix) {
+			$warnings[] = lemonfacturx_trans('LemonFacturXWarnEndpointSuffixCharset');
+		}
+		$endpointLen = strlen($sellerSiren.$suffixClean);
+		if ($sellerSiren !== '' && $endpointLen > 125) {
+			$warnings[] = lemonfacturx_trans('LemonFacturXWarnEndpointTooLong', $endpointLen);
+		}
+	}
+
 	if (getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT') <= 0) {
 		$warnings[] = lemonfacturx_trans('LemonFacturXWarnNoBank');
 	}
@@ -948,6 +1107,13 @@ function lemonfacturx_build_endpoint_uri($siren, $email, $role = 'Seller')
 	if (!empty($siren)) {
 		$scheme = '0225';
 		$suffix = ($role === 'Seller') ? trim(getDolGlobalString('LEMONFACTURX_ENDPOINT_SUFFIX_SELLER', '')) : '';
+		// BR-FR-23 : une adresse électronique en 0225 n'admet que les
+		// alphanumériques, le tiret, le tiret bas et le point — tout autre
+		// caractère du suffixe configuré est retiré (sanitisation défensive ;
+		// un avertissement est émis par lemonfacturx_check_mandatory).
+		if ($suffix !== '') {
+			$suffix = preg_replace('/[^A-Za-z0-9._-]/', '', $suffix);
+		}
 		$value  = $siren.$suffix;
 	} elseif (!empty($email)) {
 		$scheme = 'EM';
@@ -1134,10 +1300,18 @@ function lemonfacturx_get_prepaid_amount($invoice)
  *  - facture d'origine d'un avoir ou d'une rectificative (fk_facture_source)
  *  - factures d'acompte imputées sur la facture (llx_societe_remise_except)
  *
- * @param object $invoice Facture Dolibarr
+ * Rectificatives (BT-3 384/471/472/473) : BR-FR-CO-04 exige UNE ET UNE SEULE
+ * référence BT-25 — celle de la facture remplacée. Les factures d'acompte
+ * imputées ne sont donc PAS référencées en BG-3 dans ce cas (le montant
+ * prépayé reste porté par BT-113) ; sans cette restriction, une rectificative
+ * avec acompte imputé produirait N>1 références et le validateur interne
+ * bloquerait à tort la génération en mode strict.
+ *
+ * @param object $invoice  Facture Dolibarr
+ * @param string $typeCode TypeCode BT-3 émis ('380', '384', '381'...) ; '' = pas de restriction
  * @return array Liste de ['ref' => string, 'date' => 'YYYYMMDD'|'']
  */
-function lemonfacturx_get_preceding_invoices($invoice)
+function lemonfacturx_get_preceding_invoices($invoice, $typeCode = '')
 {
 	$out = [];
 	$seen = [];
@@ -1146,12 +1320,15 @@ function lemonfacturx_get_preceding_invoices($invoice)
 		return $out;
 	}
 
+	// BR-FR-CO-04 : une rectificative ne référence QUE la facture remplacée
+	$isCorrective = in_array($typeCode, ['384', '471', '472', '473'], true);
+
 	$sourceIds = [];
 	if (!empty($invoice->fk_facture_source)) {
 		$sourceIds[] = (int) $invoice->fk_facture_source;
 	}
 
-	if (!empty($invoice->id)) {
+	if (!$isCorrective && !empty($invoice->id)) {
 		// Acomptes/avoirs consommés sur cette facture via remises exceptionnelles
 		$sql = "SELECT DISTINCT fk_facture_source FROM ".MAIN_DB_PREFIX."societe_remise_except"
 			." WHERE fk_facture = ".((int) $invoice->id)." AND fk_facture_source IS NOT NULL";
@@ -1548,6 +1725,16 @@ function lemonfacturx_list_pdf_fonts()
  *   TAX_MODE 2 = sur les encaissements → '72'
  *   TAX_MODE 0 = standard (mixte) : on suit TAX_MODE_SELL_SERVICE si explicite,
  *                sinon on omet (BT-8 optionnel, ne pas deviner).
+ *
+ * Conformité XP Z12-012 vérifiée (2026-07) : la codelist UNTDID 2475 admise par
+ * EN16931 en CII est {5, 29, 72}. Pour l'option « débits », la règle
+ * BR-FR-MAP-03 impose la valeur 5 en CII, et BR-FR-MAP-29 précise que le PPF
+ * n'attend QUE 5 (le 29 « date de livraison », pourtant admis par EN16931, doit
+ * être retranscrit en 5 dans les flux). Le 72 (date de paiement) code la TVA
+ * sur les encaissements. Le mapping actuel est donc exact — ne pas y toucher.
+ * Périmètre d'émission : uniquement sur les catégories 'S' (cf. build_xml), ce
+ * qui est correct — toute ligne à taux > 0 est classée S par ce module, et
+ * l'exigibilité n'a pas de sens sur les catégories sans TVA due (E/K/G/AE/O/Z).
  *
  * @return string  '5', '72' ou '' (omis)
  */

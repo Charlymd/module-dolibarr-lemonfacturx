@@ -4,7 +4,7 @@
 
 Module Dolibarr pour la génération automatique de factures **Factur-X EN16931** (PDF/A-3 avec XML CrossIndustryInvoice embarqué).
 
-Chaque facture client générée dans Dolibarr est automatiquement convertie au format Factur-X, conforme aux règles **BR-FR** (norme XP Z12-012 V1.2.0) pour la facturation électronique française.
+Chaque facture client générée dans Dolibarr est automatiquement convertie au format Factur-X, conforme aux règles **BR-FR** (norme XP Z12-012, édition juin 2026) pour la facturation électronique française.
 
 Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et communication à Clermont-Ferrand, spécialisée dans Dolibarr, WordPress et la facturation électronique.
 
@@ -297,9 +297,33 @@ Avant injection PDF, le module valide systématiquement le XML :
 
 1. **Well-formed** : `DOMDocument::loadXML()`
 2. **XSD EN16931** : `DOMDocument::schemaValidate()` contre le XSD embarqué
-3. **Règles métier** (`LEMONFACTURX_BR_CHECK`, défaut activé) : sous-ensemble des règles Schematron EN16931 vérifié en PHP — règles de calcul BR-CO-10..17, BR-27 (prix négatifs), BR-61 (IBAN), BR-16, BR-IC-02/11/12 (intracom), BR-AE-02, motifs d'exonération BR-\*-10, BR-CO-25/26, BR-09/11
+3. **Règles métier** (`LEMONFACTURX_BR_CHECK`, défaut activé) : sous-ensemble des règles Schematron EN16931 vérifié en PHP — règles de calcul BR-CO-10..17, BR-27 (prix négatifs), BR-61 (IBAN), BR-16, BR-IC-02/11/12 (intracom), BR-AE-02, motifs d'exonération BR-\*-10, BR-CO-25/26, BR-09/11 — **plus le bloc de règles France BR-FR** (voir section suivante)
 
 Le Schematron officiel complet (XSLT 2.0) n'est pas exécutable en PHP : pour une validation exhaustive, utiliser un validateur externe — voir [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+### Conformité XP Z12-012 (règles France)
+
+Règles du socle réforme française contrôlées ou émises par le module. Le bloc de règles BR-FR du validateur interne ne s'applique que si le **vendeur est établi en France** (métropole + DOM assimilés, cf. BR-FR-MAP-14) : Factur-X est aussi utilisé hors de France (ZUGFeRD) et le socle réforme n'est pas opposable à un vendeur étranger — les règles EN16931, elles, restent universelles.
+
+| Règle | Objet | Traitement |
+|---|---|---|
+| BR-FR-01 / BR-FR-02 | Identifiant de facture (BT-1) : 35 caractères max, alphanumériques + `- + _ /` (espace interdit) | Violation bloquante (validateur) + warning amont |
+| BR-FR-04 | Type de document (BT-3) : liste fermée FR (380, 381, 384, 386, avoirs/rectificatives déclinés…) | Violation bloquante (allowlist défensive) |
+| BR-FR-05 / BR-FR-06 | Notes PMD, PMT, AAB (pénalités, indemnité 40 €, escompte), une seule fois chacune | Émises automatiquement, surchargeables |
+| BR-FR-07 / BR-FR-20 / BR-FR-31 | Note **BAR** qualifiant le traitement attendu : `B2B` (e-invoicing, cas nominal), `B2BINT` (acheteur assujetti hors France), `B2C` (acheteur non assujetti, **y compris établi hors France** — choix assumé : la liste fermée de BR-FR-20, révision juillet 2025, ne comporte pas de valeur « B2C international ») — DOM assimilés à la France (BR-FR-MAP-14) | Émise automatiquement (profil PDP), une seule occurrence |
+| BR-FR-08 | Cadre de facturation (BT-23) : socle `B1`/`S1`/`M1` selon la nature des lignes (cas nominal : dépôt par le fournisseur), `B4`/`S4`/`M4` pour une facture définitive après acompte (jamais sur l'acompte lui-même — BR-FR-CO-08) ; cadres AIFE `A1..A25` par facture en profil Chorus B2G | Émis automatiquement |
+| BR-FR-09 | Cohérence SIRET/SIREN (vendeur et acheteur) : SIRET à 14 chiffres dont les 9 premiers = SIREN | Violation bloquante + warning amont |
+| BR-FR-16 | Taux de TVA vs liste française fermée (métropole + DOM) | **Warning uniquement** — un taux légitime n'est jamais bloqué |
+| BR-FR-CO-04 / BR-FR-CO-05 | Rectificative (384…) : exactement **une** référence à la facture d'origine (BT-25) avec sa date — le générateur ne référence alors QUE la facture remplacée en BG-3 (les acomptes imputés restent portés par BT-113) ; avoir (381…) : au moins une référence datée | Violation bloquante (+ warning amont si la facture d'origine n'est pas liée) |
+| BR-FR-23 / BR-FR-25 | Adresse électronique 0225 : alphanumériques + `- _ .` uniquement (le suffixe vendeur configuré est sanitisé à l'émission), 125 caractères max | Violation bloquante (charset) + warning (longueur) |
+| BR-FR-MAP-03 / MAP-29 | Exigibilité TVA (BT-8) : `5` = débits (seule valeur CII attendue par le PPF), `72` = encaissements, dérivée de `TAX_MODE` | Émis automatiquement |
+
+Rappel du fonctionnement : les « violations bloquantes » n'interrompent la génération qu'en mode strict (`LEMONFACTURX_STRICT_MODE=1`) ; en best-effort elles sont consolidées dans le message d'avertissement et le syslog.
+
+**Limitations assumées** :
+- le profil **EXTENDED-CTC-FR n'est pas émis** (le module produit du EN16931) — cible envisagée pour 2027 ; la variante « référence en ligne » d'un avoir (EXT-FR-FE-136, BR-FR-CO-05) est donc sans objet ;
+- la **construction des flux 1 / 10.1** vers le PPF (troncatures BR-FR-MAP-\*, transcodage des codes pays DOM…) est **déléguée à la Plateforme Agréée** : le module fournit le Factur-X source ;
+- BR-FR-10/11 (SIREN présent et actif dans l'annuaire PPF) nécessitent l'accès à l'annuaire : pré-check couvert par LemonSuperPDP, pas par ce module.
 
 ## API REST
 
@@ -360,7 +384,7 @@ En cas de doute, faire foi : validation XSD contre les schémas Factur-X 1.08 em
 
 ### Tests unitaires standalone (CI)
 
-`tests/unit-tests.php` s'exécute **sans Dolibarr** (stubs embarqués) : 18 scénarios / 100+ assertions couvrant avoirs, remises BG-21, intracom K/AE, export, franchise, stress d'arrondis 50 lignes, acomptes, prélèvement SEPA, multidevise, formats. Chaque XML généré est validé **XSD + règles métier**.
+`tests/unit-tests.php` s'exécute **sans Dolibarr** (stubs embarqués) : 28 scénarios / 170+ assertions couvrant avoirs, remises BG-21, intracom K/AE, export, franchise, stress d'arrondis 50 lignes, acomptes, prélèvement SEPA, multidevise, formats, et les règles France XP Z12-012 (BT-1, cohérence SIREN/SIRET, BG-3 des avoirs/rectificatives — dont la 384 avec acompte imputé, BT-23 socle, note BAR, sanitisation d'endpoint, taux de TVA, non-application du bloc BR-FR à un vendeur étranger). Chaque XML généré est validé **XSD + règles métier**.
 
 ```bash
 php tests/unit-tests.php
@@ -377,6 +401,17 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 ```
 
 ## Changelog
+
+### 3.9.0 (juillet 2026)
+
+**Mise en conformité XP Z12-012 (édition juin 2026) — socle minimum de la réforme.**
+- **Bloc de règles France au validateur** : BR-FR-01/02 (BT-1 ≤ 35 caractères, charset strict sans espace), BR-FR-04 (liste fermée des types de document BT-3), BR-FR-09 (cohérence SIRET/SIREN vendeur et acheteur), BR-FR-23 (charset des adresses électroniques en schemeID 0225).
+- **Références obligatoires** (BR-FR-CO-04/05) : un avoir sans référence à la facture d'origine est désormais **bloqué** (plus un simple warning) ; une rectificative (384) exige exactement une référence datée — et n'agrège plus les acomptes imputés dans BG-3 (bug corrigé).
+- **BT-23 cadre de facturation** émis pour le profil PDP/B2B (B1/S1/M1 déduit des lignes, x4 pour une facture définitive après acomptes) — le chemin Chorus Pro B2G (codes AIFE) est inchangé.
+- **Note BAR** (BR-FR-20) : qualification du traitement attendue par les plateformes (B2B / B2BINT / B2C) émise dans le XML, déduite du profil du tiers.
+- Sanitisation du suffixe d'endpoint vendeur + borne de longueur (BR-FR-23/25) ; BT-8 vérifié contre la codelist (mapping 5/72 déjà correct, documentation enrichie).
+- **+50 tests unitaires** (177 au total) couvrant toutes les nouvelles règles.
+- Limitation assumée documentée : profil EXTENDED-CTC-FR (multi-vendeurs, sous-lignes) non émis — cible 2027 ; la construction des flux 1/10.1 relève de la Plateforme Agréée.
 
 ### 3.8.0 (juin 2026)
 

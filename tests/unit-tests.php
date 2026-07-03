@@ -102,6 +102,20 @@ function lfx_std_validate($xml, $xsdPath, $expectBrOk = true)
 	return $violations;
 }
 
+/**
+ * Vrai si au moins une entrée du tableau contient le fragment donné
+ * (préfixe de règle « BR-FR-01 », clé de traduction, etc.).
+ */
+function lfx_contains($entries, $needle)
+{
+	foreach ((array) $entries as $e) {
+		if (strpos((string) $e, $needle) !== false) {
+			return true;
+		}
+	}
+	return false;
+}
+
 echo "=== LemonFacturX - Tests unitaires standalone ===\n\n";
 
 $mysoc = lfx_make_party(['name' => 'LEMON SASU', 'idprof1' => '909458306', 'idprof2' => '90945830600012', 'tva_intra' => 'FR38909458306']);
@@ -447,8 +461,8 @@ $w = [];
 $xml = lemonfacturx_build_xml($inv, $mysoc, $w);
 lfx_std_validate($xml, $xsdPath);
 $xp = lfx_xpath($xml);
-// BT-23 n'est plus émis sur le PDF principal (PDP) — il est par-facture en profil Chorus (cf. U01c)
-lfx_assert_eq(0, $xp->query('//ram:BusinessProcessSpecifiedDocumentContextParameter')->length, 'BT-23 absent du profil PDP');
+// BT-23 (BR-FR-08) : cadre socle émis en profil PDP — B1 = dépôt fournisseur de biens
+lfx_assert_eq('B1', lfx_xp_str($xp, '//ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID'), 'BT-23 socle B1 en profil PDP (BR-FR-08)');
 lfx_assert_eq('72', lfx_xp_str($xp, '//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:DueDateTypeCode'), 'BT-8 = 72 (TAX_MODE=2 encaissements)');
 lfx_assert_eq('SERVICE-ACHATS-75', lfx_xp_str($xp, '//ram:BuyerReference'), 'BT-10 ref client');
 lfx_assert_eq('CO2606-0042', lfx_xp_str($xp, '//ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID'), 'BT-13 commande liée');
@@ -597,6 +611,285 @@ lfx_assert_eq('1234.50', lemonfacturx_format_amount(1234.5), 'montant');
 lfx_assert_eq('a &amp; b &lt;c&gt;', lemonfacturx_xml_encode('a & b <c>'), 'échappement XML');
 lfx_assert_eq('123456789', lemonfacturx_extract_siren('12345678900011'), 'SIREN depuis SIRET');
 echo "U18 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U22 BR-FR-01/02 identifiant de facture (BT-1)';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0001-AVEC-UNE-REFERENCE-BEAUCOUP-TROP-LONGUE'; // 51 caractères
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 20.0, 20.00)];
+$inv->total_ht = 100.00;
+$inv->total_tva = 20.00;
+$inv->total_ttc = 120.00;
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-01'), 'BR-FR-01 détectée (BT-1 > 35 caractères)');
+lfx_assert(!lfx_contains($violations, 'BR-FR-02'), 'pas de BR-FR-02 (charset valide)');
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnRefTooLong'), 'warning amont BT-1 trop long (check_mandatory)');
+
+$inv->ref = 'FA 2606 (BIS)'; // espace et parenthèses interdits
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-02'), 'BR-FR-02 détectée (espace/parenthèses dans BT-1)');
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnRefCharset'), 'warning amont charset BT-1 (check_mandatory)');
+
+$inv->ref = 'FA/2606+01_A'; // - + _ / admis par BR-FR-02
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(!lfx_contains($violations, 'BR-FR-01') && !lfx_contains($violations, 'BR-FR-02'), 'référence avec - + _ / acceptée');
+echo "U22 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U23 BR-FR-09 cohérence SIREN/SIRET';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0020';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 20.0, 20.00)];
+$inv->total_ht = 100.00;
+$inv->total_tva = 20.00;
+$inv->total_ttc = 120.00;
+// Vendeur : SIREN saisi (idprof1) sans rapport avec le SIRET (idprof2)
+$socBad = lfx_make_party(['name' => 'INCOHERENT SARL', 'idprof1' => '111222333', 'idprof2' => '99988877700012', 'tva_intra' => 'FR00111222333']);
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $socBad, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-09'), 'BR-FR-09 détectée (SIRET vendeur ≠ SIREN)');
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $socBad), 'LemonFacturXWarnSellerSirenSiretMismatch'), 'warning amont vendeur (check_mandatory)');
+// Acheteur : même incohérence côté tiers
+$inv->thirdparty = lfx_make_party(['idprof1' => '555666777', 'idprof2' => '12345678900011']);
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-09'), 'BR-FR-09 détectée (SIRET acheteur ≠ SIREN)');
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnBuyerSirenSiretMismatch'), 'warning amont acheteur (check_mandatory)');
+// Cohérent : aucune violation BR-FR-09
+$inv->thirdparty = lfx_make_party();
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(!lfx_contains($violations, 'BR-FR-09'), 'pas de BR-FR-09 quand SIREN et SIRET concordent');
+echo "U23 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U24 BR-FR-CO-04/CO-05 avoir et rectificative sans facture d\'origine';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'AV2606-0002';
+$inv->type = 2; // TYPE_CREDIT_NOTE, sans fk_facture_source
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(-500.00, 20.0, -100.00)];
+$inv->total_ht = -500.00;
+$inv->total_tva = -100.00;
+$inv->total_ttc = -600.00;
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-CO-05'), 'BR-FR-CO-05 : avoir sans référence BT-25 bloqué');
+lfx_assert(lfx_contains($w, 'LemonFacturXWarnCreditNoteNoSource'), 'warning avoir sans origine conservé');
+
+$inv2 = new LfxFakeInvoice();
+$inv2->ref = 'FA2606-0021';
+$inv2->type = 1; // TYPE_REPLACEMENT, sans fk_facture_source
+$inv2->thirdparty = lfx_make_party();
+$inv2->lines = [lfx_make_line(500.00, 20.0, 100.00)];
+$inv2->total_ht = 500.00;
+$inv2->total_tva = 100.00;
+$inv2->total_ttc = 600.00;
+$w2 = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv2, $mysoc, $w2));
+lfx_assert(lfx_contains($violations, 'BR-FR-CO-04'), 'BR-FR-CO-04 : rectificative sans référence BT-25 bloquée');
+lfx_assert(lfx_contains($w2, 'LemonFacturXWarnCorrectiveNoSource'), 'warning rectificative sans origine émis');
+echo "U24 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U24bis rectificative 384 + acompte imputé : une seule référence BG-3';
+lfx_reset([], ['iban' => 'FR7630006000011234567890189', 'bic' => 'AGRIFRPP'], [
+	'societe_remise_except' => [(object) ['fk_facture_source' => 9]],
+	'FROM '.MAIN_DB_PREFIX.'facture WHERE rowid = 9' => [(object) ['ref' => 'AC2606-0009', 'datef' => '2026-05-01']],
+	'FROM '.MAIN_DB_PREFIX.'facture WHERE rowid = 42' => [(object) ['ref' => 'FA2605-0099', 'datef' => '2026-05-12']],
+]);
+$inv = new LfxFakeInvoice();
+$inv->id = 11;
+$inv->ref = 'FA2606-0027';
+$inv->type = 1; // TYPE_REPLACEMENT → 384
+$inv->fk_facture_source = 42; // facture remplacée
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00)];
+$inv->total_ht = 1000.00;
+$inv->total_tva = 200.00;
+$inv->total_ttc = 1200.00;
+$inv->sumDepositsUsed = 240.00; // acompte consommé via remise exceptionnelle
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+$violations = lfx_std_validate($xml, $xsdPath);
+lfx_assert(!lfx_contains($violations, 'BR-FR-CO-04'), 'pas de fausse violation BR-FR-CO-04 sur une 384 avec acompte imputé');
+$xp = lfx_xpath($xml);
+lfx_assert_eq('384', lfx_xp_str($xp, '//rsm:ExchangedDocument/ram:TypeCode'), 'TypeCode 384');
+lfx_assert_eq(1, $xp->query('//ram:InvoiceReferencedDocument')->length, 'une et une seule référence BT-25 (BR-FR-CO-04)');
+lfx_assert_eq('FA2605-0099', lfx_xp_str($xp, '//ram:InvoiceReferencedDocument/ram:IssuerAssignedID'), 'BG-3 = la facture remplacée (pas l\'acompte)');
+lfx_assert_eq('20260512', lfx_xp_str($xp, '//ram:InvoiceReferencedDocument/ram:FormattedIssueDateTime/qdt:DateTimeString'), 'BG-3 date de la facture remplacée (BT-26)');
+lfx_assert_eq('240.00', lfx_xp_str($xp, '//ram:TotalPrepaidAmount'), 'BT-113 acompte imputé conservé');
+lfx_assert_eq('960.00', lfx_xp_str($xp, '//ram:DuePayableAmount'), 'BT-115 = 1200 - 240');
+echo "U24bis OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U25 BT-23 socle (BR-FR-08) : S1/M1/B4 et garde acompte';
+lfx_reset();
+$bt23Query = '//ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID';
+// Services uniquement → S1
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0022';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00, 1.0, 'Prestation', 1)];
+$inv->total_ht = 1000.00;
+$inv->total_tva = 200.00;
+$inv->total_ttc = 1200.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+lfx_std_validate($xml, $xsdPath);
+lfx_assert_eq('S1', lfx_xp_str(lfx_xpath($xml), $bt23Query), 'BT-23 = S1 (services)');
+// Biens + services → M1
+$inv->lines = [
+	lfx_make_line(600.00, 20.0, 120.00, 1.0, 'Marchandise', 0),
+	lfx_make_line(400.00, 20.0, 80.00, 1.0, 'Installation', 1),
+];
+$w = [];
+lfx_assert_eq('M1', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $bt23Query), 'BT-23 = M1 (double)');
+// Facture définitive après acompte → B4
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00, 1.0, 'Marchandise', 0)];
+$inv->sumDepositsUsed = 240.00;
+$w = [];
+lfx_assert_eq('B4', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $bt23Query), 'BT-23 = B4 (définitive après acompte)');
+// Facture d'acompte (386) : jamais de cadre x4 (BR-FR-CO-08)
+$inv->type = 3; // TYPE_DEPOSIT
+$w = [];
+lfx_assert_eq('B1', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $bt23Query), 'BT-23 = B1 sur une facture d\'acompte (garde BR-FR-CO-08)');
+echo "U25 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U26 note BAR (BR-FR-07/20/31)';
+lfx_reset();
+$barQuery = '//ram:IncludedNote[ram:SubjectCode="BAR"]/ram:Content';
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0023';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00)];
+$inv->total_ht = 1000.00;
+$inv->total_tva = 200.00;
+$inv->total_ttc = 1200.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+lfx_std_validate($xml, $xsdPath);
+$xp = lfx_xpath($xml);
+lfx_assert_eq('B2B', lfx_xp_str($xp, $barQuery), 'note BAR = B2B (acheteur assujetti FR)');
+lfx_assert_eq(1, $xp->query('//ram:IncludedNote[ram:SubjectCode="BAR"]')->length, 'une seule note BAR (BR-FR-31)');
+// Acheteur assujetti UE → B2BINT (e-reporting international)
+$inv->thirdparty = lfx_make_party(['country_code' => 'DE', 'tva_intra' => 'DE129273398', 'idprof2' => '']);
+$inv->lines = [lfx_make_line(1000.00, 0.0, 0.00, 1.0, 'Prestation', 1)];
+$inv->total_tva = 0.00;
+$inv->total_ttc = 1000.00;
+$inv->total_ht = 1000.00;
+$w = [];
+lfx_assert_eq('B2BINT', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $barQuery), 'note BAR = B2BINT (acheteur UE)');
+// Particulier → B2C (e-reporting B2C)
+$inv->thirdparty = lfx_make_party(['typent_code' => 'TE_PRIVATE', 'idprof2' => '', 'tva_intra' => '']);
+$inv->lines = [lfx_make_line(1000.00, 20.0, 200.00)];
+$inv->total_tva = 200.00;
+$inv->total_ttc = 1200.00;
+$w = [];
+lfx_assert_eq('B2C', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $barQuery), 'note BAR = B2C (particulier)');
+// Particulier étranger → B2C aussi : choix assumé, la liste fermée BR-FR-20
+// (révision juillet 2025) ne comporte pas de valeur « B2C international »
+// (cf. docblock de lemonfacturx_resolve_bar_code)
+$inv->thirdparty = lfx_make_party(['typent_code' => 'TE_PRIVATE', 'country_code' => 'DE', 'idprof2' => '', 'tva_intra' => '']);
+$w = [];
+lfx_assert_eq('B2C', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), $barQuery), 'note BAR = B2C (particulier étranger — pas de B2CINT dans la liste fermée BR-FR-20)');
+// Profil Chorus B2G : pas de note BAR (marquage B2G distinct, chemin inchangé)
+$inv->thirdparty = lfx_make_party();
+$w = [];
+$xmlChorus = lemonfacturx_build_xml($inv, $mysoc, $w, ['profile' => 'choruspro']);
+lfx_assert_eq(0, lfx_xpath($xmlChorus)->query('//ram:IncludedNote[ram:SubjectCode="BAR"]')->length, 'pas de note BAR en profil Chorus');
+echo "U26 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U27 suffixe endpoint vendeur sanitisé (BR-FR-23)';
+lfx_reset(['LEMONFACTURX_ENDPOINT_SUFFIX_SELLER' => '_Status!*']);
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0024';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 20.0, 20.00)];
+$inv->total_ht = 100.00;
+$inv->total_tva = 20.00;
+$inv->total_ttc = 120.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+lfx_std_validate($xml, $xsdPath);
+lfx_assert_eq('909458306_Status', lfx_xp_str(lfx_xpath($xml), '//ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID'), 'suffixe sanitisé : « !* » retirés (BR-FR-23)');
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnEndpointSuffixCharset'), 'warning charset du suffixe (check_mandatory)');
+// Suffixe déjà conforme : conservé tel quel, aucun warning charset
+lfx_reset(['LEMONFACTURX_ENDPOINT_SUFFIX_SELLER' => '_Status']);
+$w = [];
+lfx_assert_eq('909458306_Status', lfx_xp_str(lfx_xpath(lemonfacturx_build_xml($inv, $mysoc, $w)), '//ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID'), 'suffixe conforme conservé');
+lfx_assert(!lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnEndpointSuffixCharset'), 'pas de warning sur suffixe conforme');
+echo "U27 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U28 BR-FR-04 type de document hors liste FR';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0025';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 20.0, 20.00)];
+$inv->total_ht = 100.00;
+$inv->total_tva = 20.00;
+$inv->total_ttc = 120.00;
+$w = [];
+$xml = lemonfacturx_build_xml($inv, $mysoc, $w);
+lfx_assert(!lfx_contains(lemonfacturx_validate_business_rules($xml), 'BR-FR-04'), '380 admis par BR-FR-04');
+// XML altéré : 751 (facture d'information, UNTDID 1001) est proscrit en France
+$xmlBad = str_replace('<ram:TypeCode>380</ram:TypeCode>', '<ram:TypeCode>751</ram:TypeCode>', $xml);
+lfx_assert(lfx_contains(lemonfacturx_validate_business_rules($xmlBad), 'BR-FR-04'), 'BR-FR-04 détectée (TypeCode 751 hors liste)');
+echo "U28 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U29 BR-FR-16 taux de TVA hors liste FR (warning)';
+lfx_reset();
+$inv = new LfxFakeInvoice();
+$inv->ref = 'FA2606-0026';
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 19.0, 19.00)]; // 19 % : pas un taux français
+$inv->total_ht = 100.00;
+$inv->total_tva = 19.00;
+$inv->total_ttc = 119.00;
+lfx_assert(lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnVatRateNotFR'), 'warning BR-FR-16 sur un taux à 19 %');
+$inv->lines = [lfx_make_line(100.00, 8.5, 8.50)]; // 8,5 % : taux DOM légitime
+$inv->total_tva = 8.50;
+$inv->total_ttc = 108.50;
+lfx_assert(!lfx_contains(lemonfacturx_check_mandatory($inv, $mysoc), 'LemonFacturXWarnVatRateNotFR'), 'pas de warning sur le taux DOM 8,5 %');
+// Jamais bloquant : le validateur ne porte aucune violation BR-FR-16
+$w = [];
+lfx_assert(!lfx_contains(lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w)), 'BR-FR-16'), 'BR-FR-16 non bloquante (warning uniquement)');
+echo "U29 OK\n";
+
+// ---------------------------------------------------------------------------
+$currentTest = 'U30 vendeur non français : règles BR-FR non opposables';
+lfx_reset();
+$mysocDE = lfx_make_party(['name' => 'ACME GMBH', 'country_code' => 'DE', 'idprof1' => '', 'idprof2' => '', 'tva_intra' => 'DE129273398', 'zip' => '10115', 'town' => 'Berlin']);
+$inv = new LfxFakeInvoice();
+$inv->ref = 'RE 2026 0042'; // espaces : violerait BR-FR-02 pour un vendeur FR
+$inv->type = 1; // rectificative sans facture d'origine : violerait BR-FR-CO-04
+$inv->thirdparty = lfx_make_party();
+$inv->lines = [lfx_make_line(100.00, 20.0, 20.00)];
+$inv->total_ht = 100.00;
+$inv->total_tva = 20.00;
+$inv->total_ttc = 120.00;
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysocDE, $w));
+lfx_assert(!lfx_contains($violations, 'BR-FR'), 'aucune violation BR-FR pour un vendeur DE ('.implode(' ; ', $violations).')');
+// Contre-épreuve : même facture avec vendeur FR → le bloc BR-FR s'applique
+$w = [];
+$violations = lemonfacturx_validate_business_rules(lemonfacturx_build_xml($inv, $mysoc, $w));
+lfx_assert(lfx_contains($violations, 'BR-FR-02'), 'contre-épreuve vendeur FR : BR-FR-02 détectée');
+lfx_assert(lfx_contains($violations, 'BR-FR-CO-04'), 'contre-épreuve vendeur FR : BR-FR-CO-04 détectée');
+echo "U30 OK\n";
 
 // ---------------------------------------------------------------------------
 echo "\n=== Résultat ===\n";

@@ -133,6 +133,14 @@ LemonFacturXWarnTotalsMismatch = total TTC du XML (%s) différent du total Dolib
 LemonFacturXWarnVeraPdfNotFound = veraPDF introuvable ou non exécutable : %s (LEMONFACTURX_VERAPDF_PATH)
 LemonFacturXWarnVeraPdfFailed = veraPDF : le PDF généré n'est pas conforme PDF/A-3b (détail dans syslog) — vérifier MAIN_PDF_FORCE_FONT et les images du modèle PDF
 LemonFacturXWarnBrPrefix = règle métier EN16931 :
+LemonFacturXWarnCorrectiveNoSource = facture rectificative sans facture d'origine liée : la référence à la facture remplacée (BT-25, exigée par la règle BR-FR-CO-04) ne peut pas être émise — créer la facture de remplacement depuis la facture d'origine
+LemonFacturXWarnRefTooLong = référence de facture (BT-1) trop longue : %s caractères, maximum 35 (règle BR-FR-01)
+LemonFacturXWarnRefCharset = référence de facture (BT-1) « %s » avec caractères non admis — autorisés : lettres, chiffres et - + _ / , sans espace (règle BR-FR-02)
+LemonFacturXWarnSellerSirenSiretMismatch = SIREN (%s) et SIRET (%s) de la société émettrice incohérents : les 9 premiers chiffres du SIRET doivent correspondre au SIREN (règle BR-FR-09) — corriger la fiche société
+LemonFacturXWarnBuyerSirenSiretMismatch = SIREN (%s) et SIRET (%s) du tiers acheteur incohérents : les 9 premiers chiffres du SIRET doivent correspondre au SIREN (règle BR-FR-09) — corriger la fiche tiers
+LemonFacturXWarnVatRateNotFR = taux de TVA %s %% hors de la liste des taux français admis, métropole et DOM (règle BR-FR-16) — vérifier la saisie si ce taux n'est pas volontaire
+LemonFacturXWarnEndpointSuffixCharset = le suffixe d'adresse électronique vendeur (LEMONFACTURX_ENDPOINT_SUFFIX_SELLER) contient des caractères non admis — seuls lettres, chiffres et - _ . sont conservés à l'émission (règle BR-FR-23)
+LemonFacturXWarnEndpointTooLong = adresse électronique du vendeur de %s caractères : maximum 125 (règle BR-FR-25) — raccourcir le suffixe configuré
 
 LemonFacturXAboutTitle = Développé et maintenu par Lemon
 LemonFacturXAboutIntro = LemonFacturX est un module open source gratuit, développé par <a href="https://hellolemon.fr" target="_blank" rel="noopener"><strong>Lemon</strong></a>, agence web et communication à Clermont-Ferrand (63) depuis 2012. Nous accompagnons TPE, PME et indépendants sur Dolibarr, la facturation électronique et l'IA métier.

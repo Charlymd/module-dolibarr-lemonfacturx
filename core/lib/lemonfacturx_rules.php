@@ -15,6 +15,9 @@
  * un remplacement du Schematron officiel (200+ règles, XSLT 2.0 — non
  * exécutable avec l'extension XSL de PHP, limitée à XSLT 1.0) : c'est un
  * filet de sécurité couvrant les rejets les plus courants.
+ *
+ * Dépend de lemonfacturx.lib.php (constante LEMONFACTURX_FR_OVERSEAS_COUNTRIES),
+ * toujours incluse avant ce fichier par le hook, l'API et les tests.
  */
 
 /**
@@ -293,6 +296,101 @@ function lemonfacturx_validate_business_rules($xml)
 		$terms = $str('//ram:SpecifiedTradePaymentTerms/ram:Description');
 		if (empty($dueDate) && empty($terms)) {
 			$violations[] = 'BR-CO-25 : montant à payer positif sans date d\'échéance (BT-9) ni conditions de paiement (BT-20)';
+		}
+	}
+
+	// =========================================================================
+	// Règles France — XP Z12-012 §4.5.1 (socle réforme facture électronique).
+	// Sous-ensemble contrôlable sur le XML émis ; les règles nécessitant
+	// l'annuaire PPF (BR-FR-10/11) ou le contexte applicatif restent hors champ.
+	// Opposables aux seuls vendeurs établis en France (métropole + DOM assimilés,
+	// même liste que BR-FR-MAP-14) : Factur-X est aussi utilisé hors de France
+	// (ZUGFeRD) et le socle réforme ne s'applique pas à un vendeur étranger —
+	// les règles EN16931 ci-dessus restent, elles, universelles.
+	// =========================================================================
+	$sellerCountry = $str('//ram:SellerTradeParty/ram:PostalTradeAddress/ram:CountryID');
+	if ($sellerCountry === 'FR' || in_array($sellerCountry, LEMONFACTURX_FR_OVERSEAS_COUNTRIES, true)) {
+
+		// === BR-FR-01 / BR-FR-02 : identifiant de facture (BT-1) ===
+		$bt1 = $str('//rsm:ExchangedDocument/ram:ID');
+		if ($bt1 !== null && $bt1 !== '') {
+			$bt1Len = function_exists('mb_strlen') ? mb_strlen($bt1) : strlen($bt1);
+			if ($bt1Len > 35) {
+				$violations[] = 'BR-FR-01 : identifiant de facture (BT-1) limité à 35 caractères ('.$bt1Len.' émis)';
+			}
+			// Charset fermé : alphanumériques + tiret, signe plus, tiret bas, barre
+			// oblique. L'espace n'est pas admis (retiré de la liste en V1.1).
+			if (!preg_match('/^[A-Za-z0-9+_\/-]+$/', $bt1)) {
+				$violations[] = 'BR-FR-02 : identifiant de facture (BT-1) « '.$bt1.' » — seuls les alphanumériques et - + _ / sont admis (espace interdit)';
+			}
+		}
+
+		// === BR-FR-04 : type de document (BT-3) — liste fermée admise en France ===
+		// Simples 380/389/393/501, acomptes 386/500, rectificatives 384/471/472/473,
+		// avoirs 261/262/381/396/502/503. Tout autre code UNTDID 1001 est proscrit.
+		$bt3 = $str('//rsm:ExchangedDocument/ram:TypeCode');
+		$frTypeCodes = ['380', '389', '393', '501', '386', '500', '384', '471', '472', '473', '261', '262', '381', '396', '502', '503'];
+		if ($bt3 !== null && $bt3 !== '' && !in_array($bt3, $frTypeCodes, true)) {
+			$violations[] = 'BR-FR-04 : type de document (BT-3) « '.$bt3.' » hors de la liste fermée admise en France';
+		}
+
+		// === BR-FR-09 : cohérence SIRET / SIREN par partie ===
+		// Le SIRET (schemeID 0009) doit faire 14 chiffres et ses 9 premiers chiffres
+		// doivent correspondre au SIREN (schemeID 0002) quand les deux sont présents.
+		foreach (['Seller' => 'vendeur', 'Buyer' => 'acheteur'] as $partyTag => $partyLabel) {
+			$base = '//ram:'.$partyTag.'TradeParty';
+			$siret = $str($base.'/ram:GlobalID[@schemeID="0009"]');
+			if ($siret === null || $siret === '') {
+				// Profil Chorus Pro : le SIRET est porté par SpecifiedLegalOrganization
+				$siret = $str($base.'/ram:SpecifiedLegalOrganization/ram:ID[@schemeID="0009"]');
+			}
+			$siren = $str($base.'/ram:SpecifiedLegalOrganization/ram:ID[@schemeID="0002"]');
+			if ($siret !== null && $siret !== '') {
+				if (!preg_match('/^\d{14}$/', $siret)) {
+					$violations[] = 'BR-FR-09 : le SIRET du '.$partyLabel.' doit comporter 14 chiffres ('.$siret.')';
+				} elseif ($siren !== null && $siren !== '' && strncmp($siret, $siren, 9) !== 0) {
+					$violations[] = 'BR-FR-09 : SIRET du '.$partyLabel.' ('.$siret.') incohérent avec son SIREN ('.$siren.') — les 9 premiers chiffres doivent correspondre';
+				}
+			}
+		}
+
+		// === BR-FR-CO-04 / BR-FR-CO-05 : référence à la facture antérieure (BG-3) ===
+		// Rectificatives : exactement UNE référence (BT-25) avec sa date (BT-26) —
+		// le générateur ne référence QUE la facture remplacée dans ce cas (les
+		// acomptes imputés restent en BT-113, cf. lemonfacturx_get_preceding_invoices).
+		// Avoirs : au moins une référence avec sa date. (La variante « référence en
+		// ligne » EXT-FR-FE-136 relève du profil EXTENDED-CTC-FR, non émis ici.)
+		$precedingDocs = $xp->query('//ram:ApplicableHeaderTradeSettlement/ram:InvoiceReferencedDocument');
+		$hasDatedRef = false;
+		foreach ($precedingDocs as $prd) {
+			if (!empty($str('ram:FormattedIssueDateTime/qdt:DateTimeString', $prd))) {
+				$hasDatedRef = true;
+				break;
+			}
+		}
+		if (in_array($bt3, ['384', '471', '472', '473'], true)) {
+			if ($precedingDocs->length !== 1) {
+				$violations[] = 'BR-FR-CO-04 : facture rectificative ('.$bt3.') — une et une seule référence à la facture antérieure (BT-25) est exigée ('.$precedingDocs->length.' émise(s))';
+			} elseif (!$hasDatedRef) {
+				$violations[] = 'BR-FR-CO-04 : facture rectificative ('.$bt3.') — la date de la facture antérieure (BT-26) est exigée';
+			}
+		}
+		if (in_array($bt3, ['261', '381', '396', '502', '503'], true)) {
+			if ($precedingDocs->length === 0) {
+				$violations[] = 'BR-FR-CO-05 : avoir ('.$bt3.') — au moins une référence à la facture antérieure (BT-25) est exigée (créer l\'avoir depuis la facture d\'origine)';
+			} elseif (!$hasDatedRef) {
+				$violations[] = 'BR-FR-CO-05 : avoir ('.$bt3.') — la date de la facture antérieure (BT-26) est exigée sur la référence';
+			}
+		}
+
+		// === BR-FR-23 : adresse électronique 0225 — charset fermé ===
+		// Alphanumériques + tiret, tiret bas, point (liste PLUS restrictive que
+		// celle du BT-1 : ni « + » ni « / »).
+		foreach ($xp->query('//ram:URIUniversalCommunication/ram:URIID[@schemeID="0225"]') as $uriNode) {
+			$uriVal = trim($uriNode->textContent);
+			if ($uriVal !== '' && !preg_match('/^[A-Za-z0-9._-]+$/', $uriVal)) {
+				$violations[] = 'BR-FR-23 : adresse électronique 0225 « '.$uriVal.' » — seuls les alphanumériques et - _ . sont admis';
+			}
 		}
 	}
 

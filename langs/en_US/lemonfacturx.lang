@@ -133,6 +133,14 @@ LemonFacturXWarnTotalsMismatch = XML grand total (%s) differs from the Dolibarr 
 LemonFacturXWarnVeraPdfNotFound = veraPDF not found or not executable: %s (LEMONFACTURX_VERAPDF_PATH)
 LemonFacturXWarnVeraPdfFailed = veraPDF: the generated PDF is not PDF/A-3b compliant (details in syslog) — check MAIN_PDF_FORCE_FONT and the PDF template images
 LemonFacturXWarnBrPrefix = EN16931 business rule:
+LemonFacturXWarnCorrectiveNoSource = corrective invoice without a linked source invoice: the reference to the replaced invoice (BT-25, required by rule BR-FR-CO-04) cannot be emitted — create the replacement invoice from the original invoice
+LemonFacturXWarnRefTooLong = invoice reference (BT-1) too long: %s characters, maximum 35 (rule BR-FR-01)
+LemonFacturXWarnRefCharset = invoice reference (BT-1) "%s" contains characters that are not allowed — allowed: letters, digits and - + _ / , no space (rule BR-FR-02)
+LemonFacturXWarnSellerSirenSiretMismatch = seller SIREN (%s) and SIRET (%s) are inconsistent: the first 9 digits of the SIRET must match the SIREN (rule BR-FR-09) — fix the company card
+LemonFacturXWarnBuyerSirenSiretMismatch = buyer SIREN (%s) and SIRET (%s) are inconsistent: the first 9 digits of the SIRET must match the SIREN (rule BR-FR-09) — fix the third-party card
+LemonFacturXWarnVatRateNotFR = VAT rate %s %% is not in the list of allowed French rates, mainland and overseas departments (rule BR-FR-16) — check the input if this rate is not intentional
+LemonFacturXWarnEndpointSuffixCharset = the seller electronic address suffix (LEMONFACTURX_ENDPOINT_SUFFIX_SELLER) contains characters that are not allowed — only letters, digits and - _ . are kept when emitting (rule BR-FR-23)
+LemonFacturXWarnEndpointTooLong = seller electronic address is %s characters long: maximum 125 (rule BR-FR-25) — shorten the configured suffix
 
 LemonFacturXAboutTitle = Developed and maintained by Lemon
 LemonFacturXAboutIntro = LemonFacturX is a free open source module, developed by <a href="https://hellolemon.fr" target="_blank" rel="noopener"><strong>Lemon</strong></a>, a web agency based in Clermont-Ferrand (France) since 2012. We support small businesses on Dolibarr, e-invoicing and business AI.
