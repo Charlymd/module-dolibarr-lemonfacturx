@@ -1,0 +1,9 @@
+# Exclusions d'archive : git archive doit produire le même contenu que le ZIP
+# du CI (release-zip.yml). demo/ et tests/ contiennent des scripts hors
+# packaging Dolistore (le packager du store rejette leurs includes non
+# standard) ; .github/ est l'outillage du repo.
+/demo export-ignore
+/tests export-ignore
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
