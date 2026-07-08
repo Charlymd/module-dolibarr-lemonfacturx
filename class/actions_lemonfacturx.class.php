@@ -655,8 +655,14 @@ class ActionsLemonFacturX
 	/**
 	 * Vérifie le PDF de la facture : présence d'un XML Factur-X embarqué,
 	 * validation XSD + règles métier. Affiche le résultat en event message.
+	 *
+	 * PUBLIQUE : appelée aussi depuis l'extérieur du hook — notamment par
+	 * l'onglet « Facturation électronique » de LemonSuperPDP (tab_lifecycle.php),
+	 * qui vérifie la visibilité par réflexion avant l'appel (fallback fiche
+	 * facture pour les installations avec un LemonFacturX antérieur).
+	 * Ne PAS repasser en protected : cela casserait le bouton côté LemonSuperPDP.
 	 */
-	protected function verifyInvoicePdf($invoice)
+	public function verifyInvoicePdf($invoice)
 	{
 		global $conf, $langs;
 

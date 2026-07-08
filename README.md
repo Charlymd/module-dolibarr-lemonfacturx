@@ -402,6 +402,10 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 
 ## Changelog
 
+### 3.9.1 (juillet 2026)
+
+`ActionsLemonFacturX::verifyInvoicePdf()` passe **publique** : elle est appelée par l'onglet « Facturation électronique » de LemonSuperPDP (bouton « Vérifier la Factur-X ») pour afficher le résultat sans quitter l'onglet. Aucun autre changement.
+
 ### 3.9.0 (juillet 2026)
 
 **Mise en conformité XP Z12-012 (édition juin 2026) — socle minimum de la réforme.**
