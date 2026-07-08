@@ -116,7 +116,7 @@ function lemonfacturx_build_xml($invoice, $mysoc, &$buildWarnings = [], $options
 	$currency = !empty($conf->currency) ? $conf->currency : 'EUR';
 
 	$buyer = $invoice->thirdparty;
-	$bank = lemonfacturx_get_bank_account($invoice->db);
+	$bank = lemonfacturx_get_bank_account($invoice->db, $invoice);
 	$paymentMeans = getDolGlobalString('LEMONFACTURX_PAYMENT_MEANS', '30');
 
 	// Lignes utiles : on filtre une seule fois les lignes sans montant
@@ -466,14 +466,24 @@ function lemonfacturx_prepare_lines($billableLines, $sign, $invoice, $thirdparty
 }
 
 /**
- * Récupère IBAN/BIC depuis le compte bancaire configuré dans le module.
+ * Résout le compte bancaire (IBAN/BIC) à publier dans le XML.
  *
- * @param object $db Handle DB Dolibarr
- * @return array ['iban' => string, 'bic' => string] (chaînes vides si non configuré)
+ * Priorité — pour que le XML colle au PDF (issue #16) :
+ *   1. le compte choisi SUR LA FACTURE (fk_account), c.-à-d. exactement celui
+ *      que Dolibarr imprime dans le PDF quand un compte est sélectionné au
+ *      niveau du tiers ou de la facture ;
+ *   2. à défaut, le compte figé dans la config du module
+ *      (LEMONFACTURX_BANK_ACCOUNT) — repli historique, préserve l'existant.
+ *
+ * @param object      $db      Handle DB Dolibarr
+ * @param object|null $invoice Facture courante (pour lire fk_account) ; null = config seule
+ * @return array ['iban' => string, 'bic' => string] (chaînes vides si aucun compte résolu)
  */
-function lemonfacturx_get_bank_account($db)
+function lemonfacturx_get_bank_account($db, $invoice = null)
 {
-	$bankAccountId = getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT');
+	$bankAccountId = ($invoice !== null && !empty($invoice->fk_account))
+		? (int) $invoice->fk_account
+		: getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT');
 	if ($bankAccountId <= 0) {
 		return ['iban' => '', 'bic' => ''];
 	}
@@ -985,7 +995,10 @@ function lemonfacturx_check_mandatory($invoice, $mysoc)
 		}
 	}
 
-	if (getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT') <= 0) {
+	// Compte bancaire : OK si la facture en porte un (fk_account) OU si le module
+	// en a un configuré. On n'avertit que si les deux manquent (issue #16 : le
+	// compte de la facture prime sur la config).
+	if (empty($invoice->fk_account) && getDolGlobalInt('LEMONFACTURX_BANK_ACCOUNT') <= 0) {
 		$warnings[] = lemonfacturx_trans('LemonFacturXWarnNoBank');
 	}
 

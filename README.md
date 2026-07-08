@@ -402,6 +402,10 @@ php tests/run-tests.php   # exit 0 = OK, 1 = échec
 
 ## Changelog
 
+### 3.9.2 (juillet 2026)
+
+**Le compte bancaire du XML suit celui de la facture** ([issue #16](https://github.com/hello-lemon/module-dolibarr-lemonfacturx/issues/16)). Le module publiait toujours l'IBAN/BIC du compte figé dans sa configuration, même quand un autre compte était sélectionné au niveau du tiers ou de la facture (le PDF, lui, montrait le bon) — d'où un IBAN incohérent entre PDF et XML. Désormais l'ordre de résolution est : **compte sélectionné sur la facture (`fk_account`) → compte configuré dans le module (repli)**. Rétrocompatible : sans compte sur la facture, le comportement précédent est conservé.
+
 ### 3.9.1 (juillet 2026)
 
 `ActionsLemonFacturX::verifyInvoicePdf()` passe **publique** : elle est appelée par l'onglet « Facturation électronique » de LemonSuperPDP (bouton « Vérifier la Factur-X ») pour afficher le résultat sans quitter l'onglet. Aucun autre changement.
