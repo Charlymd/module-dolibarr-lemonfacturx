@@ -45,7 +45,7 @@ $form = new Form($db);
  * Enregistrement des paramètres Chorus
  */
 if ($action === 'savechorus' && $user->hasRight('facture', 'creer')) {
-	if (GETPOST('token', 'alpha') !== newToken()) {
+	if (GETPOST('token', 'alpha') !== currentToken()) {
 		accessforbidden('Bad value for CSRF token');
 	}
 	$object->array_options['options_lfxchorus']      = GETPOSTINT('lfxchorus');
@@ -67,7 +67,7 @@ if ($action === 'savechorus' && $user->hasRight('facture', 'creer')) {
  * au reste de la note.
  */
 if ($action === 'writechorusnote' && $user->hasRight('facture', 'creer')) {
-	if (GETPOST('token', 'alpha') !== newToken()) {
+	if (GETPOST('token', 'alpha') !== currentToken()) {
 		accessforbidden('Bad value for CSRF token');
 	}
 	$o = $object->array_options;
